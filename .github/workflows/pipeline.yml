@@ -10,6 +10,9 @@ on:
       CODECOV_TOKEN:
         required: false
     outputs:
+      dispatch:
+        description: JSON list of workflow files commit directives asked to start
+        value: ${{ jobs.config.outputs.dispatch }}
       released:
         value: ${{ jobs.release.outputs.released }}
       tag:
@@ -33,6 +36,7 @@ jobs:
       run-ci: ${{ steps.paths.outputs.run-ci }}
       matrix: ${{ steps.matrix.outputs.matrix }}
       any: ${{ steps.matrix.outputs.any }}
+      dispatch: ${{ steps.directives.outputs.dispatch || '[]' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,14 +66,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ghtools release decide --github-output
+      - name: Commit directives
+        id: directives
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: ghtools directives resolve --before "$BEFORE" --github-output
       - name: Should CI run?
         id: paths
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           WOULD_RELEASE: ${{ steps.decide.outputs.released }}
+          FORCE_CI: ${{ steps.directives.outputs.force-ci }}
         run: |
-          if [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ]; then
+          if [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ] || [ "$FORCE_CI" = "true" ]; then
             echo "run-ci=true" >> "$GITHUB_OUTPUT"
           else
             run_ci="$(ghtools ci should-run --base "$BEFORE")"
@@ -80,7 +91,11 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: ghtools ci matrix --base "$BASE" --head "$HEAD" --github-output
+          FORCE_CI: ${{ steps.directives.outputs.force-ci }}
+        run: |
+          args=(--base "$BASE" --head "$HEAD" --github-output)
+          if [ "$FORCE_CI" = "true" ]; then args+=(--all); fi
+          ghtools ci matrix "${args[@]}"
 
   ci-python:
     needs: config

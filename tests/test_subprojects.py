@@ -202,3 +202,13 @@ def test_a_moved_file_selects_both_subprojects(git_repo):
         "a/mod.py",
         "b/mod.py",
     ]
+
+
+def test_forced_matrix_selects_every_subproject(git_repo):
+    # Review F-M6: `[ci]` must run every subproject's tests, not only the changed ones.
+    git_repo.commit("feat: a", {".github/ghtools.toml": UMBRELLA_TOML, "a/x.py": "1"})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("docs: readme", {"README.md": "x"})
+    cfg = config.load(git_repo.path)
+    m, any_legs = subprojects.matrix(cfg, git_repo.path, base, "HEAD", force=True)
+    assert any_legs and [leg["subproject"] for leg in m["include"]] == ["a"]

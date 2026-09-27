@@ -296,7 +296,7 @@ def _cmd_ci_matrix(args: Any) -> int:
     from .subprojects import matrix
 
     root = repo_dir(args)
-    m, any_legs = matrix(_config.load(root), root, args.base, args.head)
+    m, any_legs = matrix(_config.load(root), root, args.base, args.head, force=args.all)
     if args.github_output:
         write_github_output(
             {"matrix": json.dumps(m, separators=(",", ":")), "any": str(any_legs).lower()}
@@ -326,6 +326,7 @@ def _ci_commands(sub: Any) -> None:
     m.add_argument("--base", default="")
     m.add_argument("--head", default="HEAD")
     m.add_argument("--github-output", action="store_true")
+    m.add_argument("--all", action="store_true", help="every subproject (a [ci] directive)")
     m.set_defaults(handler=_cmd_ci_matrix)
 
 
@@ -656,6 +657,63 @@ def _subprojects_commands(sub: Any) -> None:
     ss = p.add_subparsers(dest="subprojects_cmd", required=True, metavar="<subcommand>")
     st = ss.add_parser("status", help="each submodule pointer against its remote (local only)")
     st.set_defaults(handler=_cmd_subprojects_status)
+
+
+def _cmd_directives_resolve(args: Any) -> int:
+    from . import directives
+
+    root = repo_dir(args)
+    cfg = _config.load(root)
+    effects = []
+    if cfg.get("directives.enabled"):
+        effects = directives.resolve(
+            directives.messages(root, args.before),
+            cfg.get("directives.dispatch"),
+            cfg.get("docs.enabled"),
+        )
+    annotate = os.environ.get("GITHUB_ACTIONS") == "true"
+    for e in effects:
+        prefix = {"warn": "::warning::", "notice": "::notice::"}.get(e.kind, "") if annotate else ""
+        print(f"{prefix}{e.message or f'{e.directive}: {e.kind} {e.target}'.strip()}")
+    force = any(e.kind == "force-ci" for e in effects)
+    dispatch = sorted({e.target for e in effects if e.kind == "dispatch"})
+    if args.github_output:
+        write_github_output({"force-ci": str(force).lower(), "dispatch": json.dumps(dispatch)})
+    return 0
+
+
+@registrar
+def _directives_commands(sub: Any) -> None:
+    p = sub.add_parser("directives", help="CI directives in pushed commit messages")
+    ds = p.add_subparsers(dest="directives_cmd", required=True, metavar="<subcommand>")
+    r = ds.add_parser("resolve", help="resolve the directives in commits since --before")
+    r.add_argument("--before", default="", help="the push's previous head (github.event.before)")
+    r.add_argument("--github-output", action="store_true")
+    r.set_defaults(handler=_cmd_directives_resolve)
+
+
+def _cmd_stub(args: Any) -> int:
+    from .ci import STUB_PATH
+    from .errors import PreconditionError
+    from .scaffold import _edited_after_commit, current_stub
+
+    root = repo_dir(args)
+    text = current_stub(root)
+    if not args.write:
+        print(text, end="")
+        return 0
+    if _edited_after_commit(root, [STUB_PATH]):
+        raise PreconditionError(f"{STUB_PATH} has uncommitted edits; commit or discard them first")
+    (root / STUB_PATH).write_text(text, encoding="utf-8")
+    print(f"wrote {STUB_PATH}")
+    return 0
+
+
+@registrar
+def _stub_command(sub: Any) -> None:
+    p = sub.add_parser("stub", help="the workflow stub for the current settings (keeps its pin)")
+    p.add_argument("--write", action="store_true", help="write it to .github/workflows/ghtools.yml")
+    p.set_defaults(handler=_cmd_stub)
 
 
 def build_parser() -> argparse.ArgumentParser:

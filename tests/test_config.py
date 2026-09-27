@@ -303,3 +303,49 @@ def test_subproject_paths_are_normalised_and_confined():
             match=r"subprojects\[0\]\.path: .* must be a relative path inside the repository",
         ):
             config.from_dict({"subprojects": [{"name": "c", "path": bad}]})
+
+
+def test_directives_dispatch_table():
+    cfg = config.from_dict(
+        {"directives": {"enabled": True, "dispatch": {"update-todo": "update-todo.yml"}}}
+    )
+    assert cfg.get("directives.dispatch") == {"update-todo": "update-todo.yml"}
+
+
+@pytest.mark.parametrize(
+    ("dispatch", "message"),
+    [
+        ({"ci": "ci.yml"}, r"directives\.dispatch: 'ci' is a built-in directive"),
+        ({"Todo": "t.yml"}, r"directives\.dispatch: 'Todo' must match"),
+        ({"todo": "../x.yml"}, r"directives\.dispatch\.todo: expected a workflow file name"),
+        ({"todo": 3}, r"directives\.dispatch: expected a table of strings"),
+    ],
+)
+def test_directives_dispatch_errors(dispatch, message):
+    with pytest.raises(ConfigError, match=message):
+        config.from_dict({"directives": {"dispatch": dispatch}})
+
+
+def test_dict_values_dump_as_inline_tables():
+    text = config.dump_toml({"directives.dispatch": {"update-todo": "update-todo.yml"}})
+    assert 'dispatch = { "update-todo" = "update-todo.yml" }' in text
+    assert tomllib.loads(text)["directives"]["dispatch"] == {"update-todo": "update-todo.yml"}
+
+
+@pytest.mark.parametrize(
+    ("dispatch", "message"),
+    [
+        ({"todo": "a b.yml"}, r"directives\.dispatch\.todo: expected a workflow file name"),
+        ({"todo": "*.yml"}, r"directives\.dispatch\.todo: expected a workflow file name"),
+        ({"todo": "-h.yml"}, r"directives\.dispatch\.todo: expected a workflow file name"),
+        ({"test-full": "t.yml"}, r"directives\.dispatch: 'test-full' is a built-in directive"),
+        (
+            {"coverage-code-full": "t.yml"},
+            r"directives\.dispatch: 'coverage-code-full' is a built-in directive",
+        ),
+    ],
+)
+def test_dispatch_names_and_files_are_strict(dispatch, message):
+    # Review F-M3/M4: dispatch.yml word-splits file names; `-full` forms are built-in directives.
+    with pytest.raises(ConfigError, match=message):
+        config.from_dict({"directives": {"dispatch": dispatch}})

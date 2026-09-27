@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from ghtools import scaffold
 from ghtools.gates import BUILTIN
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -115,7 +116,7 @@ def test_pipeline_contract_matches_the_stub():
 
     doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
     call = doc[True]["workflow_call"]
-    assert set(call["outputs"]) == {"released", "tag", "version", "dist-artifact"}
+    assert set(call["outputs"]) == {"released", "tag", "version", "dist-artifact", "dispatch"}
     assert set(call["inputs"]) == {"dry-run"}
     assert set(call["secrets"]) == {"CODECOV_TOKEN"}
     stub = yaml.safe_load(render_stub("main", pypi=True))
@@ -256,3 +257,73 @@ def test_subproject_setup_runs_after_install():
         ]["steps"]
     ]
     assert names.index("Setup (subproject)") > names.index("Install")
+
+
+def test_directives_force_ci_and_export_dispatch():
+    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    config = doc["jobs"]["config"]
+    step = next(s for s in config["steps"] if s.get("id") == "directives")
+    assert "ghtools directives resolve" in step["run"]
+    assert step["if"] == "github.event_name == 'push'"
+    paths = next(s for s in config["steps"] if s.get("id") == "paths")
+    assert "FORCE_CI" in paths["env"] and "$FORCE_CI" in paths["run"]
+    on = doc[True] if True in doc else doc["on"]  # PyYAML reads the key `on` as True
+    assert "dispatch" in on["workflow_call"]["outputs"]
+
+
+def test_dispatch_workflow():
+    doc = yaml.safe_load((ROOT / ".github/workflows/dispatch.yml").read_text())
+    (job,) = doc["jobs"].values()
+    assert job["permissions"] == {"actions": "write"}
+    run = job["steps"][0]["run"]
+    assert "gh workflow run" in run and "::warning::" in run
+    assert "${{" not in run  # workflow names reach the shell through env only
+
+
+def _stub_grants():
+    stub = yaml.safe_load(scaffold.render_stub("main", pypi=True))
+    return stub["permissions"]
+
+
+def test_pipeline_never_requests_more_than_the_stub_grants():
+    # A called workflow's job asking for more than the caller grants fails every run at startup.
+    level = {"none": 0, "read": 1, "write": 2}
+    grants = _stub_grants()
+    seen = set()
+
+    def check(name):
+        if name in seen:
+            return
+        seen.add(name)
+        doc = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+        for job_name, job in doc["jobs"].items():
+            for scope, want in (job.get("permissions") or {}).items():
+                have = grants.get(scope, "none")
+                assert level[want] <= level[have], (
+                    f"{name}:{job_name} wants {scope}: {want}, stub grants {have}"
+                )
+            uses = job.get("uses", "")
+            if uses.startswith("$/.github/workflows/"):
+                check(uses.removeprefix("$/.github/workflows/"))
+
+    check("pipeline.yml")
+
+
+@pytest.mark.skipif(not shutil.which("actionlint"), reason="actionlint not installed")
+@pytest.mark.parametrize("dispatch", [False, True])
+def test_rendered_stub_passes_actionlint(tmp_path, dispatch):
+    wf = tmp_path / ".github/workflows"
+    wf.mkdir(parents=True)
+    (wf / "ghtools.yml").write_text(scaffold.render_stub("main", pypi=True, dispatch=dispatch))
+    proc = subprocess.run(
+        ["actionlint", "-no-color", str(wf / "ghtools.yml")], capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_forced_ci_selects_every_subproject_and_no_dead_outputs():
+    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    config_job = doc["jobs"]["config"]
+    step = next(s for s in config_job["steps"] if s.get("id") == "matrix")
+    assert "FORCE_CI" in step["env"] and "--all" in step["run"]
+    assert "force-ci" not in config_job["outputs"]  # only the step output is used

@@ -350,3 +350,30 @@ def test_detected_install_brings_the_test_extra(git_repo):
     assert rows["a"]["install"] == ["-e ./a[test]"]
     assert rows["b"]["install"] == ["-e ./b[dev]"]
     assert "install" not in rows["c"]
+
+
+SPH_DIRECTIVES = """name: Commit Directives
+on:
+  push:
+    branches: ["**"]
+jobs:
+  dispatch-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python .github/scripts/resolve_directives.py
+      - run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref master
+      - run: gh workflow run update-todo.yml --repo "$GITHUB_REPOSITORY" --ref master
+"""
+
+
+def test_sph_dev_directives_detected(git_repo):
+    git_repo.commit(
+        "feat: a",
+        {
+            "pyproject.toml": '[project]\nname = "sph"\nversion = "0.28.0"\n',
+            ".github/workflows/directives.yml": SPH_DIRECTIVES,
+        },
+    )
+    values = detect(git_repo.path).values
+    assert values["directives.enabled"] is True
+    assert values["directives.dispatch"] == {"update-todo": "update-todo.yml"}

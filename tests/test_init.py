@@ -321,3 +321,55 @@ def test_init_notes_needs_for_several_subprojects(git_repo):
     )
     plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1")
     assert any("needs = [" in note for note in plan.notes)
+
+
+def test_stub_dispatch_job_only_when_configured():
+    plain = scaffold.render_stub("main", pypi=False)
+    assert "dispatch.yml@" not in plain and "actions: write" not in plain
+    stub = yaml.safe_load(scaffold.render_stub("main", pypi=False, dispatch=True))
+    job = stub["jobs"]["dispatch"]
+    assert job["permissions"] == {"actions": "write"}
+    assert job["uses"].endswith("/.github/workflows/dispatch.yml@v1")
+    assert "actions" not in stub["permissions"]  # granted to that one job only
+
+
+def test_current_stub_keeps_the_pin_and_follows_settings(git_repo):
+    from ghtools.cli import main
+
+    stub = scaffold.render_stub("main", pypi=False, ref="main")
+    git_repo.commit(
+        "ci: ghtools",
+        {
+            ".github/ghtools.toml": '[directives]\nenabled = true\ndispatch = { "t" = "t.yml" }\n',
+            ".github/workflows/ghtools.yml": stub,
+        },
+    )
+    text = scaffold.current_stub(git_repo.path)
+    assert "pipeline.yml@main" in text and "dispatch.yml@main" in text
+    assert main(["-C", str(git_repo.path), "stub", "--write"]) == 0
+    assert (git_repo.path / ".github/workflows/ghtools.yml").read_text() == text
+    (git_repo.path / ".github/workflows/ghtools.yml").write_text("edited\n")
+    assert main(["-C", str(git_repo.path), "stub", "--write"]) == 3
+
+
+def test_directives_workflow_is_replaced():
+    wf = "jobs:\n  r:\n    steps:\n      - run: python .github/scripts/resolve_directives.py\n"
+    assert scaffold.classify_workflow(wf)[0] == "replace"
+
+
+def test_init_names_tests_that_import_a_removed_script(git_repo):
+    # Review F-I1: sph-dev's tests import resolve_directives from .github/scripts; removing the
+    # script without saying so turns its CI red at collection.
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            ".github/scripts/resolve_directives.py": "def resolve(): ...\n",
+            "tests/unit/test_resolve_directives.py": "from resolve_directives import resolve\n",
+            "tests/test_other.py": "import json\n",
+        },
+    )
+    plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1")
+    notes = [n for n in plan.notes if "tests/unit/test_resolve_directives.py" in n]
+    assert notes and "resolve_directives" in notes[0]
+    assert not any("test_other.py" in n for n in plan.notes)

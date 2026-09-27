@@ -289,6 +289,23 @@ def _subprojects(root: Path, d: Detection) -> None:
         d.set("status.rows", ["python", "builds", "subprojects"], "in-tree subprojects")
 
 
+_DISPATCH = re.compile(r"gh workflow run (\S+\.ya?ml)")
+
+
+def _directives(wfs: dict[str, str], d: Detection) -> None:
+    for text in wfs.values():
+        if "resolve_directives" not in text:
+            continue
+        files = [f for f in _DISPATCH.findall(text) if f not in ("ci.yml", "docs.yml")]
+        d.set("directives.enabled", True, "a commit-directives workflow")
+        d.set(
+            "directives.dispatch",
+            {Path(f).stem: f for f in files},
+            "workflows it dispatches (ci and docs are built in)",
+        )
+        return
+
+
 def detect(root: Path) -> Detection:
     root = Path(root)
     d = Detection()
@@ -303,4 +320,5 @@ def detect(root: Path) -> Detection:
     _docs(root, wfs, wf, d)
     _readme(root, d)
     _subprojects(root, d)
+    _directives(wfs, d)
     return d

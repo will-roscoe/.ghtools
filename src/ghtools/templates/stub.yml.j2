@@ -41,3 +41,14 @@ jobs:
           path: dist
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 [% endif %]
+[% if dispatch %]
+  # Starts the workflows named by commit directives ([directives].dispatch in ghtools.toml).
+  dispatch:
+    needs: pipeline
+    if: github.event_name == 'push' && needs.pipeline.outputs.dispatch != '[]'
+    permissions:
+      actions: write
+    uses: will-roscoe/.ghtools/.github/workflows/dispatch.yml@[[ ref ]]
+    with:
+      workflows: ${{ needs.pipeline.outputs.dispatch }}
+[% endif %]

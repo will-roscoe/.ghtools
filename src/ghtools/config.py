@@ -97,6 +97,10 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "description": Field(str, ""),
     },
     "readme": {},  # holds only the [[readme.block]] table array
+    "directives": {
+        "enabled": Field(bool, False),
+        "dispatch": Field(dict, {}),  # directive name -> workflow file in .github/workflows/
+    },
 }
 
 TABLE_ARRAYS: dict[str, dict[str, Field]] = {
@@ -191,6 +195,10 @@ def _check_value(dotted: str, field: Field, value: Any) -> Any:
             if field.choices is not None and item not in field.choices:
                 raise ConfigError(f"{dotted}: {item!r} is not one of {sorted(field.choices)}")
         return list(value)
+    elif field.type is dict:
+        if not isinstance(value, dict) or not all(isinstance(v, str) for v in value.values()):
+            raise ConfigError(f"{dotted}: expected a table of strings, got {value!r}")
+        return dict(value)
     if field.choices is not None and value not in field.choices:
         raise ConfigError(f"{dotted}: {value!r} is not one of {sorted(field.choices)}")
     return value
@@ -285,6 +293,19 @@ def _cross_checks(cfg: Config) -> None:
         if block["kind"] == "sync" and not block["source"]:
             raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
     _check_subprojects(cfg)
+    from .directives import BUILTIN as DIRECTIVES
+
+    for name, workflow in cfg.get("directives.dispatch").items():
+        if name in DIRECTIVES or name.removesuffix("-full") in DIRECTIVES:
+            raise ConfigError(f"directives.dispatch: {name!r} is a built-in directive")
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
+            raise ConfigError(f"directives.dispatch: {name!r} must match [a-z][a-z0-9-]*")
+        # dispatch.yml word-splits the list, so names must be plain file names.
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*\.ya?ml", workflow):
+            raise ConfigError(
+                f"directives.dispatch.{name}: expected a workflow file name like ci.yml, "
+                f"got {workflow!r}"
+            )
     for name in cfg.get("status.extra"):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
             raise ConfigError(
@@ -411,6 +432,10 @@ def format_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
+    if isinstance(value, dict):
+        return (
+            "{ " + ", ".join(f"{json.dumps(k)} = {json.dumps(v)}" for k, v in value.items()) + " }"
+        )
     if isinstance(value, list):
         return "[" + ", ".join(json.dumps(v) for v in value) + "]"
     return json.dumps(value)
