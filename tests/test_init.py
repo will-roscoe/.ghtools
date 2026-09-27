@@ -138,3 +138,19 @@ def test_questions_use_answers(git_repo):
     answers = iter(["none"])
     scaffold.init_repo(git_repo.path, ask=lambda _p: next(answers), archive_mode="none", out=_quiet)
     assert config.load(git_repo.path).get("docs.enabled") is False
+
+
+def test_dry_run_shows_notes(git_repo):
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            ".github/workflows/release.yml": (
+                "jobs:\n  p:\n    steps:\n      - uses: pypa/gh-action-pypi-publish@release/v1\n"
+                "      - run: gh release create x\n"
+            ),
+        },
+    )
+    lines: list[str] = []
+    scaffold.init_repo(git_repo.path, yes=True, dry_run=True, out=lines.append)
+    assert any(line.startswith("NOTE: PyPI") for line in lines)

@@ -50,7 +50,7 @@ def _project_version(pyproject: str) -> str | None:
 def _branch(root: Path, d: Detection) -> None:
     branch = default_branch(root)
     if branch:
-        d.set("branch", branch, "origin/HEAD")
+        d.set("branch", branch, "the remote's default branch")
     else:
         d.set("branch", current_branch(root) or "main", "current branch (no origin/HEAD)")
 

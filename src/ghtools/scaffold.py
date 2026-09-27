@@ -179,6 +179,8 @@ def init_repo(
         out("\n".join(f"  = {p}  ({why})" for p, why in plan.keep.items()))
     if plan.archive:
         out("Archives: .github/ -> .github/archive/pre-ghtools-<date>/")
+    for note in plan.notes:
+        out(f"NOTE: {note}")
     if dry_run:
         out("Dry run: nothing written.")
         return 0
@@ -200,8 +202,6 @@ def init_repo(
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    for note in plan.notes:
-        out(f"NOTE: {note}")
     out(
         "Next: review `git status` / `git diff`, commit, push, then run `ghtools doctor`.\n"
         "Suggested permanent restore point: git tag pre-ghtools HEAD && git push origin pre-ghtools"

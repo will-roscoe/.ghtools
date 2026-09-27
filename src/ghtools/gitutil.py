@@ -73,8 +73,17 @@ def tag_exists(tag: str, cwd: Path | str = ".") -> bool:
 
 
 def default_branch(cwd: Path | str = ".") -> str | None:
+    """The remote's default branch: origin/HEAD if set, else asked of the remote itself.
+
+    Many clones have no refs/remotes/origin/HEAD (repos made with `git init` + `remote add`),
+    and the checkout may sit on a feature branch, so the current branch is not a fallback here.
+    """
     out = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=cwd, check=False).strip()
-    return out.removeprefix("origin/") or None
+    if out:
+        return out.removeprefix("origin/")
+    remote = git("ls-remote", "--symref", "origin", "HEAD", cwd=cwd, check=False)
+    match = re.search(r"^ref: refs/heads/(\S+)\s+HEAD$", remote, re.M)
+    return match.group(1) if match else None
 
 
 def current_branch(cwd: Path | str = ".") -> str | None:

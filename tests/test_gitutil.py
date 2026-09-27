@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from ghtools import gitutil
@@ -95,3 +97,19 @@ def test_git_failure_raises_precondition(tmp_path):
 def test_tracked_files(git_repo):
     git_repo.commit("feat: a", {"x.sh": "echo", "y.py": "1", "d/z.sh": "echo"})
     assert gitutil.tracked_files(["*.sh"], git_repo.path) == ["d/z.sh", "x.sh"]
+
+
+def test_default_branch_asks_the_remote_when_origin_head_is_unset(git_repo, tmp_path):
+    # protonfs, intercom, ios2ha-camera and bash-helpers have no refs/remotes/origin/HEAD,
+    # and their checkouts sit on next/develop/feature branches.
+    git_repo.commit("feat: a")
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    git_repo.run("remote", "add", "origin", str(bare))
+    git_repo.run("push", "-q", "origin", "main")
+    git_repo.run("switch", "-q", "-c", "next")
+    assert (
+        gitutil.git("symbolic-ref", "refs/remotes/origin/HEAD", cwd=git_repo.path, check=False)
+        == ""
+    )
+    assert gitutil.default_branch(git_repo.path) == "main"
