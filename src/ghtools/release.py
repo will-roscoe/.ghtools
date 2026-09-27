@@ -43,7 +43,7 @@ class Decision:
 
 
 def _made_by_ghtools(tag: str, root: Path) -> bool:
-    """release.yml annotates its tags "Release <tag>"; hand-made tags are never resumed."""
+    """The release job annotates its tags "Release <tag>"; hand-made tags are never resumed."""
     subject = git("tag", "-l", "--format=%(contents:subject)", tag, cwd=root, check=False).strip()
     return subject == f"Release {tag}"
 

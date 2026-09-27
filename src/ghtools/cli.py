@@ -188,7 +188,7 @@ def _cmd_release_build(args: Any) -> int:
 
 @registrar
 def _release_commands(sub: Any) -> None:
-    p = sub.add_parser("release", help="release steps used by release.yml")
+    p = sub.add_parser("release", help="release steps used by the pipeline's release job")
     rs = p.add_subparsers(dest="release_cmd", required=True, metavar="<subcommand>")
     d = rs.add_parser("decide", help="decide whether and what to release")
     d.add_argument("--github-output", action="store_true", help="write outputs to $GITHUB_OUTPUT")

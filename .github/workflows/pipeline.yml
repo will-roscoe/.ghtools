@@ -97,80 +97,440 @@ jobs:
           if [ "$FORCE_CI" = "true" ]; then args+=(--all); fi
           ghtools ci matrix "${args[@]}"
 
-  ci-python:
+
+  # Every job runs inline in this one workflow. A job-level `$/.github/workflows/...` call from here
+  # resolves against the CALLER's repository on push and workflow_dispatch (GitHub behaviour measured
+  # 2026-09-28), so nested reusable workflows would break every consumer's default-branch runs.
+  # Step-level `$/` actions (setup-ghtools) resolve correctly.
+
+  # ---- Python CI: one leg per matrix entry (python versions, runners, or subprojects) ----
+  test:
+    name: test (${{ matrix.subproject || matrix.python }}, ${{ matrix.runner }})
     needs: config
     if: >-
       needs.config.outputs.run-ci == 'true' &&
-      (fromJSON(needs.config.outputs.config).profile == 'python' ||
-       fromJSON(needs.config.outputs.config).subprojects)
+      (fromJSON(needs.config.outputs.config).profile == 'python' || fromJSON(needs.config.outputs.config).subprojects) &&
+      needs.config.outputs.any == 'true'
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    uses: $/.github/workflows/python-ci.yml
-    with:
-      matrix: ${{ needs.config.outputs.matrix }}
-      tests: ${{ needs.config.outputs.any == 'true' }}
-      gates: ${{ fromJSON(needs.config.outputs.config).profile == 'python' }}
-      codecov: ${{ fromJSON(needs.config.outputs.config).codecov }}
-      flags: ${{ fromJSON(needs.config.outputs.config).flags }}
-      docker: ${{ fromJSON(needs.config.outputs.config).docker }}
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        env:
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: |
+          if [ -n "$SUBPROJECT" ]; then ghtools ci install --subproject "$SUBPROJECT"; else ghtools ci install; fi
+      - name: Setup (subproject)
+        # After install: python-dev's setup commands import the package.
+        if: matrix.subproject
+        env:
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: ghtools ci setup --subproject "$SUBPROJECT"
+      - name: Gates
+        id: gates
+        # Umbrella repos run their test-stage gates once, in the lint job.
+        if: strategy.job-index == 0 && fromJSON(needs.config.outputs.config).profile == 'python'
+        run: |
+          ghtools gates install --stage test
+          ghtools gates run --stage test
+      - name: Test
+        id: test
+        # Runs even if a gate failed, so coverage and test results always report;
+        # the failed gate still fails the job.
+        if: ${{ !cancelled() }}
+        env:
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: |
+          if [ -n "$SUBPROJECT" ]; then ghtools ci test --subproject "$SUBPROJECT"; else ghtools ci test; fi
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          disable_search: true
+          flags: ${{ fromJSON(needs.config.outputs.config).flags == 'subproject' && matrix.subproject || (fromJSON(needs.config.outputs.config).flags == 'python-version' && format('py{0}', matrix.python) || '') }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov }}
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: junit.xml
+          disable_search: true
+          flags: ${{ fromJSON(needs.config.outputs.config).flags == 'subproject' && matrix.subproject || (fromJSON(needs.config.outputs.config).flags == 'python-version' && format('py{0}', matrix.python) || '') }}
+      - name: Record status leg
+        if: ${{ !cancelled() }}
+        continue-on-error: true  # status must never fail CI
+        env:
+          PY: ${{ matrix.python }}
+          RUNNER: ${{ matrix.runner }}
+          OUTCOME: ${{ steps.test.outcome }}
+          GATES: ${{ steps.gates.outcome }}
+          CANONICAL: ${{ strategy.job-index == 0 }}
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: |
+          args=(--python "$PY" --runner "$RUNNER" --outcome "$OUTCOME" --gates-outcome "$GATES" --out "$RUNNER_TEMP/status-leg.json")
+          if [ "$CANONICAL" = "true" ]; then args+=(--canonical); fi
+          if [ -n "$SUBPROJECT" ]; then args+=(--subproject "$SUBPROJECT"); fi
+          ghtools status leg "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          name: ghtools-status-leg-${{ matrix.python }}-${{ matrix.runner }}${{ matrix.subproject && format('-{0}', matrix.subproject) || '' }}
+          path: ${{ runner.temp }}/status-leg.json
+          retention-days: 1
 
-  ci-hacs:
+  tests-passed:
+    # One stable check name for branch protection: passes when every selected leg passed,
+    # or when nothing needed testing (a docs-only change in an umbrella repo).
+    needs: [config, test]
+    if: >-
+      always() && needs.config.result == 'success' &&
+      needs.config.outputs.run-ci == 'true' &&
+      (fromJSON(needs.config.outputs.config).profile == 'python' || fromJSON(needs.config.outputs.config).subprojects)
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: |
+          echo "tests: $RESULT"
+          [ "$RESULT" = success ] || [ "$RESULT" = skipped ]
+
+  docker:
+    needs: config
+    if: >-
+      needs.config.outputs.run-ci == 'true' &&
+      (fromJSON(needs.config.outputs.config).profile == 'python' || fromJSON(needs.config.outputs.config).subprojects) &&
+      fromJSON(needs.config.outputs.config).docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build -t ghtools-ci .
+
+  # ---- HACS integrations ----
+  hacs-lint:
     needs: config
     if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'hacs'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    uses: $/.github/workflows/hacs-ci.yml
-    with:
-      python: ${{ fromJSON(needs.config.outputs.config).python_latest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ fromJSON(needs.config.outputs.config).python_latest }}
+      - run: |
+          ghtools gates install --stage test
+          ghtools gates run --stage test
 
-  ci-lint:
+  hacs-test:
+    needs: config
+    if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'hacs'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ fromJSON(needs.config.outputs.config).python_latest }}
+      - run: ghtools ci install
+      - run: ghtools ci test
+
+  hassfest:
+    needs: config
+    if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'hacs'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: home-assistant/actions/hassfest@58bff37c8947f690ace498be413a9b78d6f30f93 # master 2026-09-27
+
+  hacs:
+    needs: config
+    if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'hacs'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
+        with:
+          category: integration
+
+  # ---- Lint-only and umbrella repos ----
+  lint:
     needs: config
     if: >-
       needs.config.outputs.run-ci == 'true' &&
       contains(fromJSON('["lint", "umbrella"]'), fromJSON(needs.config.outputs.config).profile)
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    uses: $/.github/workflows/lint-ci.yml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: |
+          ghtools gates install --stage test
+          ghtools gates run --stage test
 
+  # ---- Docs (Sphinx), deployed to Pages from the default branch ----
   docs:
-    needs: [config, ci-python, ci-hacs, ci-lint]
+    needs: [config, test, tests-passed, docker, hacs-lint, hacs-test, hassfest, hacs, lint]
     if: >-
       always() && needs.config.result == 'success' &&
       fromJSON(needs.config.outputs.config).docs.enabled &&
       !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      pages: write
-      id-token: write
-    uses: $/.github/workflows/docs.yml
-    with:
-      deploy: >-
+    env:
+      DEPLOY: >-
         ${{ needs.config.outputs.default-ref == 'true' &&
         fromJSON(needs.config.outputs.config).docs.pages && !inputs.dry-run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: System packages
+        run: |
+          pkgs_out="$(ghtools config get docs.apt)"
+          if [ -n "$pkgs_out" ]; then
+            mapfile -t pkgs <<<"$pkgs_out"
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq "${pkgs[@]}"
+          fi
+      - name: Install
+        run: ghtools docs install
+      - name: Build
+        run: ghtools docs build
+      - name: Docs gates
+        id: gates
+        run: |
+          ghtools gates install --stage docs
+          ghtools gates run --stage docs
+      - id: html
+        run: |
+          dir="$(ghtools docs html-dir)"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: env.DEPLOY == 'true'
+        with:
+          path: ${{ steps.html.outputs.dir }}
+      - name: Record docs status
+        if: ${{ !cancelled() }}
+        continue-on-error: true  # status must never fail the docs job
+        env:
+          RESULT: ${{ job.status }}
+          GATES: ${{ steps.gates.outcome }}
+        run: ghtools status collect docs --result "$RESULT" --coverage-gate "$GATES" --out "$RUNNER_TEMP/status/docs.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          name: ghtools-status-docs
+          path: ${{ runner.temp }}/status/docs.json
+          retention-days: 1
 
+  docs-deploy:
+    needs: [config, docs]
+    if: >-
+      needs.config.outputs.default-ref == 'true' &&
+      fromJSON(needs.config.outputs.config).docs.pages && !inputs.dry-run
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  # ---- Release: version from Conventional Commits, tag, GitHub release ----
   release:
-    needs: [config, ci-python, ci-hacs, ci-lint]
+    needs: [config, test, tests-passed, docker, hacs-lint, hacs-test, hassfest, hacs, lint]
     if: >-
       always() && needs.config.result == 'success' &&
       needs.config.outputs.default-ref == 'true' &&
       needs.config.outputs.would-release == 'true' &&
       !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    uses: $/.github/workflows/release.yml
-    with:
-      dry-run: ${{ inputs.dry-run }}
+    outputs:
+      released: ${{ steps.publish.outputs.released || 'false' }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+      dist-artifact: ghtools-dist
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Decide
+        id: decide
+        env:
+          # Lets `decide` resume a ghtools tag that an earlier run pushed but never released.
+          GH_TOKEN: ${{ github.token }}
+        run: ghtools release decide --github-output
+      - name: Dry-run summary
+        if: inputs.dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ghtools release decide --summary >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare the release commit and tag locally
+        if: steps.decide.outputs.released == 'true' && steps.decide.outputs.resume != 'true' && !inputs.dry-run
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Assign first: a failing `release prepare` then fails this step instead of being
+          # swallowed and releasing a tag whose version file still has the old version.
+          changed_out="$(ghtools release prepare "$VERSION")"
+          if [ -n "$changed_out" ]; then
+            mapfile -t changed <<<"$changed_out"
+            git add -- "${changed[@]}"
+            git commit -m "chore(release): $TAG [skip ci]"
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+      - name: Check out the tag to resume
+        if: steps.decide.outputs.resume == 'true' && !inputs.dry-run
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: git checkout --detach "$TAG"
+      - name: Build
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet build
+          ghtools release build --out dist
+      - name: Push release commit and tag
+        id: push
+        if: steps.decide.outputs.released == 'true' && steps.decide.outputs.resume != 'true' && !inputs.dry-run
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          branch="$(ghtools config get branch)"
+          if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            if ! git push origin "HEAD:$branch"; then
+              git fetch --quiet origin "$branch"
+              if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then
+                # No rebase: commits pushed after this run started haven't passed this run's CI.
+                # The queued run for the newer push releases everything together.
+                echo "::notice::$branch moved since this run started, so nothing was released here; the next run releases these commits together."
+                echo "pushed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "::error::Pushing the release commit to $branch was rejected. If a ruleset protects $branch, add GitHub Actions to its bypass list or set release.commit = false in .github/ghtools.toml."
+              exit 1
+            fi
+          fi
+          git push origin "refs/tags/$TAG"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run && (steps.decide.outputs.resume == 'true' || steps.push.outputs.pushed == 'true')
+        with:
+          name: ghtools-dist
+          path: dist/
+          if-no-files-found: ignore
+      - name: GitHub release
+        id: publish
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run && (steps.decide.outputs.resume == 'true' || steps.push.outputs.pushed == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.decide.outputs.version }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ghtools release notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          args=("$TAG" --title "$TAG" --verify-tag)
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            args+=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+            args+=(--generate-notes)
+          fi
+          case "$TAG" in *-*) args+=(--prerelease) ;; esac
+          shopt -s nullglob
+          files=(dist/*)
+          gh release create "${args[@]}" "${files[@]}"
+          echo "released=true" >> "$GITHUB_OUTPUT"
 
+  # ---- Status card and badges, published to the status branch ----
   status:
-    needs: [config, ci-python, ci-hacs, ci-lint, docs, release]
+    needs: [config, test, tests-passed, docker, hacs-lint, hacs-test, hassfest, hacs, lint, docs, docs-deploy, release]
     if: >-
       always() && needs.config.result == 'success' &&
       needs.config.outputs.default-ref == 'true' &&
       fromJSON(needs.config.outputs.config).status.enabled && !inputs.dry-run
+    runs-on: ubuntu-latest
+    # A stale badge is better than a red pipeline: publishing can never fail the run.
+    continue-on-error: true
     permissions:
       contents: write
-    uses: $/.github/workflows/status.yml
-    with:
-      version: ${{ needs.release.outputs.released == 'true' && needs.release.outputs.version || '' }}
+    concurrency:
+      group: ghtools-status
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ghtools-status-*
+          path: ${{ runner.temp }}/status-in
+          merge-multiple: false
+      - name: Collect and publish
+        env:
+          VERSION: ${{ needs.release.outputs.released == 'true' && needs.release.outputs.version || '' }}
+          GH_TOKEN: ${{ github.token }}
+          IN: ${{ runner.temp }}/status-in
+          OUT: ${{ runner.temp }}/status-out
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT"
+          issues="$(gh api "repos/$GITHUB_REPOSITORY" --jq .open_issues_count 2>/dev/null || true)"
+          description="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.description // ""' 2>/dev/null || true)"
+          ghtools status collect ci --legs "$IN" --out "$OUT/ci.json"
+          project_args=(--version "$VERSION" --description "$description" --out "$OUT/project.json")
+          if [ -n "$issues" ]; then project_args+=(--open-issues "$issues"); fi
+          ghtools status collect project "${project_args[@]}"
+          if [ -f "$IN/ghtools-status-docs/docs.json" ]; then cp "$IN/ghtools-status-docs/docs.json" "$OUT/docs.json"; fi
+          ghtools status publish "$OUT"/*.json
