@@ -1,0 +1,18 @@
+# Claude/agent operational files: local-only, never committed
+.claude
+.superpowers
+.remember
+CLAUDE.md
+CLAUDE.local.md
+# local-only seed material copied from other repos
+seed/
+# Python / build artefacts
+.venv/
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+coverage.xml
+junit.xml
