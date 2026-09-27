@@ -76,7 +76,7 @@ def test_protonfs_like(git_repo):
     assert v["release.publish"] == ["github", "pypi"]
     assert v["ci.python"] == ["3.9", "3.10", "3.11", "3.12", "3.13"]
     assert v["ci.runners"] == ["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest"]
-    assert v["ci.install"] == ".[dev]"
+    assert v["ci.install"] == "-e .[dev]"  # -e kept: --cov=<path> needs source-tree imports
     assert v["ci.coverage.package"] == "src/protonfs"
     assert v["ci.coverage.floor"] == 80
     assert v["ci.coverage.codecov"] is True

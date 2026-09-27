@@ -120,9 +120,10 @@ def _ci(root: Path, pyproject: str, wfs: dict[str, str], wf: str, d: Detection) 
             runners.append(runner)
     if runners:
         d.set("ci.runners", ["ubuntu-latest", *runners], "runs-on values in workflows")
-    extra = re.search(r"pip install (?:-e )?[\"']?(\.\[[\w,-]+\])[\"']?", wf)
+    extra = re.search(r"pip install (-e )?[\"']?(\.\[[\w,-]+\])[\"']?", wf)
     if extra:
-        d.set("ci.install", extra.group(1), "pip install in workflows")
+        # Keep -e: ci.coverage.package is a source path, which only an editable install covers.
+        d.set("ci.install", f"{extra.group(1) or ''}{extra.group(2)}", "pip install in workflows")
     else:
         for text in wfs.values():
             if "pytest" in text:

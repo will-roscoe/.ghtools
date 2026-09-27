@@ -52,7 +52,8 @@ SCHEMA: dict[str, dict[str, Field]] = {
     "ci": {
         "python": Field(list, ["3.12"]),
         "runners": Field(list, ["ubuntu-latest"]),
-        "install": Field(str, ".[dev]"),
+        # Editable, so tests import the source tree and --cov=<path> collects data.
+        "install": Field(str, "-e .[dev]"),
         "test": Field(str, "pytest -q"),
         "paths": Field(list, ["**.py", "pyproject.toml"]),
         "gates": Field(list, ["ruff", "ruff-format"]),

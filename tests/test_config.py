@@ -31,7 +31,7 @@ def test_values_override_defaults():
     assert cfg.get("branch") == "master"
     assert cfg.get("ci.python") == ["3.9", "3.13"]
     assert cfg.get("ci.coverage.floor") == 80
-    assert cfg.get("ci.install") == ".[dev]"
+    assert cfg.get("ci.install") == "-e .[dev]"
 
 
 @pytest.mark.parametrize(
@@ -147,3 +147,9 @@ def test_cli_config_get_unknown_key(tmp_path, capsys):
     (tmp_path / ".github/ghtools.toml").write_text("")
     assert main(["-C", str(tmp_path), "config", "get", "nope"]) == 1
     assert "unknown key 'nope'" in capsys.readouterr().err
+
+
+def test_default_install_is_editable_so_path_coverage_collects_data():
+    # A non-editable install makes tests import from site-packages, so --cov=src/<pkg>
+    # (a source path) records nothing: the first CI run of .ghtools hit exactly this.
+    assert config.from_dict({}).get("ci.install") == "-e .[dev]"
