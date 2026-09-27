@@ -257,7 +257,19 @@ def _cmd_ci_test(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
-    return _run_checked(ci.test_command(_config.load(root), args.subproject), root, "tests")
+    command = ci.test_command(_config.load(root), args.subproject)
+    if args.subproject:
+        proc = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root)
+        if proc.returncode == 5:  # pytest collected nothing: a subproject without tests
+            prefix = "::notice::" if os.environ.get("GITHUB_ACTIONS") == "true" else ""
+            print(f"{prefix}no tests collected for {args.subproject}", flush=True)
+            return 0
+        if proc.returncode != 0:
+            from .errors import CheckFailed
+
+            raise CheckFailed(f"tests failed (exit {proc.returncode})")
+        return 0
+    return _run_checked(command, root, "tests")
 
 
 def _cmd_ci_should_run(args: Any) -> int:

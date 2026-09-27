@@ -333,3 +333,20 @@ def test_subprojects_row_is_on_when_in_tree_subprojects_exist(git_repo):
         {"pyproject.toml": "[tool.ruff]\n", "a/pyproject.toml": '[project]\nname = "a"\n'},
     )
     assert "subprojects" in detect(git_repo.path).values["status.rows"]
+
+
+def test_detected_install_brings_the_test_extra(git_repo):
+    # Review D-C3: `-e ./path` alone left pytest uninstalled on every detected leg.
+    git_repo.commit(
+        "feat: a",
+        {
+            "pyproject.toml": "[tool.ruff]\n",
+            "a/pyproject.toml": '[project]\nname = "a"\n[project.optional-dependencies]\ntest = ["pytest"]\n',
+            "b/pyproject.toml": '[project]\nname = "b"\n[project.optional-dependencies]\ndev = ["pytest"]\n',
+            "c/pyproject.toml": '[project]\nname = "c"\n',
+        },
+    )
+    rows = {r["name"]: r for r in detect(git_repo.path).values["subprojects"]}
+    assert rows["a"]["install"] == ["-e ./a[test]"]
+    assert rows["b"]["install"] == ["-e ./b[dev]"]
+    assert "install" not in rows["c"]

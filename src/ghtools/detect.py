@@ -251,13 +251,13 @@ def _subprojects(root: Path, d: Detection) -> None:
         if sub.name in module_paths:  # a checked-out submodule: listed below, not built here
             continue
         try:
-            name = (
-                tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {}).get("name")
-            )
+            project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
         except tomllib.TOMLDecodeError:
             continue
+        name = project.get("name")
         if not name:
             continue
+        extras = project.get("optional-dependencies", {})
         pkgs = (
             [
                 p.name
@@ -274,6 +274,9 @@ def _subprojects(root: Path, d: Detection) -> None:
         }
         if (sub / "tests").is_dir():
             row["tests"] = f"{sub.name}/tests"
+        extra = next((e for e in ("test", "tests", "dev") if e in extras), None)
+        if extra:  # the leg needs the project's test dependencies, not just the package
+            row["install"] = [f"-e ./{sub.name}[{extra}]"]
         rows.append(row)
     for path, _url in modules:
         rows.append(

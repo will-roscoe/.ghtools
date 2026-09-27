@@ -45,16 +45,17 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Setup (subproject)
-        if: matrix.subproject
-        env:
-          SUBPROJECT: ${{ matrix.subproject }}
-        run: ghtools ci setup --subproject "$SUBPROJECT"
       - name: Install
         env:
           SUBPROJECT: ${{ matrix.subproject }}
         run: |
           if [ -n "$SUBPROJECT" ]; then ghtools ci install --subproject "$SUBPROJECT"; else ghtools ci install; fi
+      - name: Setup (subproject)
+        # After install: python-dev's setup commands import the package.
+        if: matrix.subproject
+        env:
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: ghtools ci setup --subproject "$SUBPROJECT"
       - name: Gates
         id: gates
         if: strategy.job-index == 0 && inputs.gates

@@ -86,14 +86,14 @@ SUB = config.from_dict(
 
 
 def test_subproject_install_and_test_commands():
-    assert ci.install_command(SUB, "scrapetool")[-5:] == [
+    assert ci.install_command(SUB, "scrapetool")[-7:-2] == [
         "install",
         "-e",
         "./scrapetool[test]",
         "-e",
         "./videoapp_ng[test]",
     ]
-    assert ci.install_command(SUB, "bare")[-3:] == ["install", "-e", "./bare"]
+    assert ci.install_command(SUB, "bare")[-5:-2] == ["install", "-e", "./bare"]
     assert ci.test_command(SUB, "scrapetool") == (
         "python -m pytest scrapetool/tests --cov=scrapetool --cov-report=xml:coverage.xml"
         " --junitxml=junit.xml -o junit_family=legacy"
@@ -115,3 +115,34 @@ def test_failing_setup_commands_warn_and_continue(tmp_path, capfd):
     assert main(["-C", str(tmp_path), "ci", "setup", "--subproject", "s"]) == 0
     out = capfd.readouterr().out
     assert "setup command failed (exit 1): false" in out and "ran-second" in out
+
+
+def test_subproject_install_includes_needs_and_the_test_runner():
+    # Review D-C3: a needed sibling must come from ./path, not PyPI; pytest must be present.
+    cfg = config.from_dict(
+        {
+            "subprojects": [
+                {"name": "a", "path": "a", "install": ["-e ./a[test]"]},
+                {"name": "b", "path": "b", "needs": ["a"]},
+            ]
+        }
+    )
+    cmd = ci.install_command(cfg, "b")
+    assert cmd[cmd.index("install") + 1 :] == [
+        "-e",
+        "./a[test]",
+        "-e",
+        "./b",
+        "pytest",
+        "pytest-cov",
+    ]
+
+
+def test_subproject_without_tests_passes_with_a_notice(tmp_path, capfd):
+    # Review D-I5: pytest exits 5 when it collects nothing (python-dev's devlibs, epc-calc).
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/ghtools.toml").write_text('[[subprojects]]\nname = "a"\npath = "a"\n')
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a/README.md").write_text("no tests here\n")
+    assert main(["-C", str(tmp_path), "ci", "test", "--subproject", "a"]) == 0
+    assert "no tests collected for a" in capfd.readouterr().out

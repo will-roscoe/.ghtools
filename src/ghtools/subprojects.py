@@ -18,7 +18,10 @@ def changed_between(root: Path, base: str, head: str) -> list[str] | None:
     if not base or set(base) == {"0"}:
         return None
     proc = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...{head}"], cwd=root, capture_output=True, text=True
+        ["git", "diff", "--name-only", "--no-renames", f"{base}...{head}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
     )
     if proc.returncode != 0:
         return None

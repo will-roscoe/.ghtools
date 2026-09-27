@@ -245,3 +245,14 @@ def test_subproject_legs_have_distinct_status_artifacts():
     assert (
         '--subproject "$SUBPROJECT"' in ci.split("Record status leg")[1].split("upload-artifact")[0]
     )
+
+
+def test_subproject_setup_runs_after_install():
+    # Review D-I4: python-dev's setup (FreeImage, Playwright browser) imports the package.
+    names = [
+        s.get("name")
+        for s in yaml.safe_load((ROOT / ".github/workflows/python-ci.yml").read_text())["jobs"][
+            "test"
+        ]["steps"]
+    ]
+    assert names.index("Setup (subproject)") > names.index("Install")

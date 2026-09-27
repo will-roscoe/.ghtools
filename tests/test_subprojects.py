@@ -189,3 +189,16 @@ def test_cli_subprojects_status_and_leg_flag(git_repo, capsys, tmp_path):
     ]
     assert main(["-C", str(git_repo.path), "status", "leg", *args, "--out", str(out)]) == 0
     assert json.loads(out.read_text())["subproject"] == "a"
+
+
+def test_a_moved_file_selects_both_subprojects(git_repo):
+    # Review D-I6: rename detection listed only the new path, so `a` lost a module untested.
+    git_repo.commit("feat: a", {"a/mod.py": "x = 1\n" * 20})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    (git_repo.path / "b").mkdir()
+    git_repo.run("mv", "a/mod.py", "b/mod.py")
+    git_repo.run("commit", "-q", "-m", "refactor: move")
+    assert sorted(subprojects.changed_between(git_repo.path, base, "HEAD")) == [
+        "a/mod.py",
+        "b/mod.py",
+    ]

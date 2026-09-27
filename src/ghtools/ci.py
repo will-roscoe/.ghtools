@@ -35,9 +35,21 @@ def setup_commands(cfg: Config, subproject: str) -> list[str]:
 
 def install_command(cfg: Config, subproject: str | None = None) -> list[str]:
     if subproject:
-        row = _subproject(cfg, subproject)
-        entries = row["install"] or [f"-e ./{row['path']}"]
-        return [python(), "-m", "pip", "install", *(w for e in entries for w in shlex.split(e))]
+        # Needed siblings install from their ./path (not PyPI), dependencies first; the test
+        # runner is always added since a subproject's extras may not include it.
+        order: list[dict] = []
+
+        def visit(name: str) -> None:
+            row = _subproject(cfg, name)
+            for need in row["needs"]:
+                visit(need)
+            if row not in order:
+                order.append(row)
+
+        visit(subproject)
+        entries = [e for row in order for e in (row["install"] or [f"-e ./{row['path']}"])]
+        words = [w for e in entries for w in shlex.split(e)]
+        return [python(), "-m", "pip", "install", *words, "pytest", "pytest-cov"]
     return [python(), "-m", "pip", "install", *shlex.split(cfg.get("ci.install"))]
 
 
