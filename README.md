@@ -36,7 +36,30 @@ the workflows ghtools replaces. `ghtools deinit` undoes it.
 | `ghtools resync` | after a push: fetch tags, fast-forward, reinstall an editable install |
 | `ghtools hooks install` | warn-only pre-push hook running the configured gates |
 | `ghtools status url` / `render` | the status card's README URL / a local preview of the status branch |
+| `ghtools stub [--write]` | the workflow stub for the current settings, keeping its pinned ref |
 | `ghtools readme sync --check` / `--write` | check or regenerate README blocks (`[[readme.block]]`) from their single source |
+
+## Commit directives
+
+Off by default. With `[directives] enabled = true`, tokens in the commits pushed to the default
+branch act on that pipeline run, written `[name]` or `/name`:
+
+| Token | Effect |
+|---|---|
+| `[ci]`, `[test]`, `[test-full]`, `[lint]`, `[coverage]` (optionally `:py`) | run CI even if no watched path changed |
+| any of those with another language, e.g. `[lint:f2]` | a warning; nothing to run |
+| `[docs]` | a notice: docs already build on every run |
+| a name listed in `dispatch` | start that repository workflow (`gh workflow run`) |
+
+```toml
+[directives]
+enabled = true
+dispatch = { update-todo = "update-todo.yml" }
+```
+
+A directive quoted in backticks (`` `[ci]` ``) is prose and does nothing. Release directives
+(`+:major`, `+:minor`, …, alone on a line) are separate and always on. `ghtools stub --write`
+adds the stub's dispatch job after you add `dispatch` entries.
 
 ## Versions
 
