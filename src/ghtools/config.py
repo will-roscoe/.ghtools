@@ -267,6 +267,8 @@ def _cross_checks(cfg: Config) -> None:
         if block["name"] in seen_blocks:
             raise ConfigError(f"readme.block[{i}].name: duplicate block name {block['name']!r}")
         seen_blocks.add(block["name"])
+        if not -1 <= block["heading-offset"] <= 2:  # = - ~ map to ## ### ####; keep 1..6
+            raise ConfigError(f"readme.block[{i}].heading-offset: must be between -1 and 2")
         if block["kind"] == "sync" and not block["source"]:
             raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
     for name in cfg.get("status.extra"):

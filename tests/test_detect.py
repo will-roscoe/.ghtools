@@ -225,3 +225,21 @@ def test_protonfs_style_sync_markers_detected(git_repo):
     v = detect(git_repo.path).values
     assert v["readme.block"] == [{"name": "overview", "source": "docs/_shared/overview.rst"}]
     assert "readme-sync" in v["ci.gates"]
+
+
+def test_every_sync_block_is_detected(git_repo):
+    # init migrates every SYNC block, so every one must be configured or it silently goes stale.
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            "docs/a.rst": "A.\n",
+            "docs/b.rst": "B.\n",
+            "README.md": (
+                "<!-- SYNC:a START - generated from docs/a.rst, do not edit here -->\n<!-- SYNC:a END -->\n"
+                "<!-- SYNC:b START - generated from docs/b.rst, do not edit here -->\n<!-- SYNC:b END -->\n"
+            ),
+        },
+    )
+    blocks = detect(git_repo.path).values["readme.block"]
+    assert [b["name"] for b in blocks] == ["a", "b"]

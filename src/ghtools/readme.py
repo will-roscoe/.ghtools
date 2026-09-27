@@ -211,6 +211,8 @@ def _content(block: dict, root: Path, cfg: Config) -> tuple[str, str]:
         url = status_url(slug, cfg.get("status.branch"), "status.svg")
         return "the status branch", f'<img src="{url}" alt="{slug} status" width="900">\n'
     path = root / block["source"]
+    if not path.is_file():
+        raise ReadmeError(f"{block['name']}: source {block['source']} not found")
     text = path.read_text(encoding="utf-8")
     if path.suffix == ".rst":
         return block["source"], rst_to_markdown(text, block["heading-offset"], block["source"])
@@ -247,6 +249,8 @@ def _span(text: str, name: str) -> tuple[int, int]:
 def sync(root: Path, cfg: Config, write: bool) -> list[str]:
     root = Path(root)
     path = root / "README.md"
+    if not path.is_file():
+        raise ReadmeError("README.md not found")
     raw = path.read_bytes().decode("utf-8")
     crlf = "\r\n" in raw
     text = raw.replace("\r\n", "\n")

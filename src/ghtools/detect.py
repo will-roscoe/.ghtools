@@ -222,13 +222,11 @@ def _docs(root: Path, wfs: dict[str, str], wf: str, d: Detection) -> None:
 
 def _readme(root: Path, d: Detection) -> None:
     readme = _read(root / "README.md")
-    old = re.search(r"<!-- SYNC:(\w+) START - generated from (\S+?),", readme)
-    if old and (root / old.group(2)).is_file():
-        d.set(
-            "readme.block",
-            [{"name": old.group(1), "source": old.group(2)}],
-            "SYNC markers in README.md",
-        )
+    found = re.findall(r"<!-- SYNC:(\w+) START - generated from (\S+?),", readme)
+    # init migrates every SYNC block, so configure every one (an unconfigured block goes stale).
+    blocks = [{"name": n, "source": s} for n, s in found if (root / s).is_file()]
+    if blocks:
+        d.set("readme.block", blocks, "SYNC markers in README.md")
         gates = d.values.get("ci.gates", [])
         if "readme-sync" not in gates:
             d.set("ci.gates", [*gates, "readme-sync"], "README sync markers")

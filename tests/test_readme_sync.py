@@ -119,3 +119,28 @@ def test_readme_sync_gate_is_builtin():
 
     assert BUILTIN["readme-sync"].run == "ghtools readme sync --check"
     config.from_dict({"ci": {"gates": ["readme-sync"]}})  # accepted
+
+
+def test_missing_readme_or_source_is_a_clear_error(tmp_path):
+    # Review I4: raw FileNotFoundError tracebacks named no key or file.
+    cfg = _repo(
+        tmp_path, "x", toml='[[readme.block]]\nname = "overview"\nsource = "docs/nope.rst"\n'
+    )
+    (tmp_path / "README.md").write_text(_blank("overview", "docs/nope.rst") + "\n")
+    with pytest.raises(readme.ReadmeError, match=r"overview: source docs/nope\.rst not found"):
+        readme.sync(tmp_path, cfg, write=False)
+    (tmp_path / "README.md").unlink()
+    with pytest.raises(readme.ReadmeError, match=r"README\.md not found"):
+        readme.sync(tmp_path, cfg, write=False)
+
+
+@pytest.mark.parametrize(("offset", "ok"), [(-1, True), (2, True), (-2, False), (3, False)])
+def test_heading_offset_keeps_levels_valid(offset, ok):
+    raw = {"readme": {"block": [{"name": "o", "source": "o.rst", "heading-offset": offset}]}}
+    if ok:
+        config.from_dict(raw)
+    else:
+        with pytest.raises(
+            ConfigError, match=r"readme\.block\[0\]\.heading-offset: must be between -1 and 2"
+        ):
+            config.from_dict(raw)
