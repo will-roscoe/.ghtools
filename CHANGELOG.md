@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-27
+
+### Features
+
+- first stable release of the ghtools CLI and workflows
+
 ## [0.6.0] - 2026-09-27
 
 ### Features
