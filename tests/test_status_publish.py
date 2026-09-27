@@ -136,3 +136,55 @@ def test_refuses_to_overwrite_a_branch_that_is_not_a_status_branch(git_repo, tmp
         ["git", "--git-dir", str(bare), "rev-parse", "work"], capture_output=True, text=True
     ).stdout
     assert before == after
+
+
+def test_settings_change_republishes_even_with_the_same_data(git_repo, tmp_path):
+    # Review I3: a new card layout (or template) must reach the branch without new data.
+    bare = _with_remote(git_repo, tmp_path)
+    frag = {
+        "ci": _frag("ci", coverage=90.0, tests={"passed": 1, "failed": 0, "skipped": 0, "total": 1})
+    }
+    pub.publish(git_repo.path, frag, config.from_dict({"status": {"card": ["tests"]}}))
+    assert (
+        pub.publish(git_repo.path, frag, config.from_dict({"status": {"card": ["tests"]}}))
+        == "unchanged"
+    )
+    wider = config.from_dict({"status": {"card": ["tests", "coverage"]}})
+    assert pub.publish(git_repo.path, frag, wider) == "published"
+    show = ["git", "--git-dir", str(bare), "show", "ghtools-status:status.svg"]
+    svg = subprocess.run(show, capture_output=True, text=True, check=True).stdout
+    assert "COVERAGE" in svg
+
+
+def test_a_rejected_push_that_is_not_a_race_fails_at_once_with_gits_reason(git_repo, tmp_path):
+    # Review I7: rulesets/permissions reject pushes too; retrying them only hides the reason.
+    bare = _with_remote(git_repo, tmp_path)
+    hook = bare / "hooks/pre-receive"
+    hook.write_text("#!/bin/sh\necho 'GH013: Repository rule violations found' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    sleeps = []
+    with pytest.raises(PreconditionError, match="GH013") as exc:
+        pub.publish(git_repo.path, {"ci": _frag("ci")}, CFG, sleep=sleeps.append)
+    assert sleeps == []
+    assert "attempts" not in str(exc.value)
+
+
+def test_no_sleep_after_the_last_attempt(git_repo, tmp_path):
+    _with_remote(git_repo, tmp_path)
+    counter = {"n": 0}
+
+    def always_race():
+        counter["n"] += 1
+        pub.publish(git_repo.path, {"docs": _frag("docs", build=f"p{counter['n']}")}, CFG)
+
+    sleeps = []
+    with pytest.raises(PreconditionError):
+        pub.publish(
+            git_repo.path,
+            {"x": _frag("x", v=1)},
+            CFG,
+            attempts=3,
+            before_push=always_race,
+            sleep=sleeps.append,
+        )
+    assert len(sleeps) == 2

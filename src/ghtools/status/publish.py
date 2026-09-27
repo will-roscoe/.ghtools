@@ -90,22 +90,25 @@ def _check_is_status_branch(root: Path, branch: str) -> None:
         )
 
 
-def _commit_files(root: Path, files: dict[str, bytes]) -> str:
+def _write_tree(root: Path, files: dict[str, bytes]) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
         for path, content in sorted(files.items()):
             sha = _git(root, "hash-object", "-w", "--stdin", input=content).stdout.decode().strip()
             _git(root, "update-index", "--add", "--cacheinfo", f"100644,{sha},{path}", env=env)
-        tree = _git(root, "write-tree", env=env).stdout.decode().strip()
+        return _git(root, "write-tree", env=env).stdout.decode().strip()
+
+
+def _commit_tree(root: Path, tree: str) -> str:
     identity = {} if _git(root, "config", "user.email", check=False).stdout.strip() else _BOT
     env = {**os.environ, **identity}
-    return (
-        _git(
-            root, "commit-tree", tree, "-m", "chore(status): update status card [skip ci]", env=env
-        )
-        .stdout.decode()
-        .strip()
-    )
+    message = "chore(status): update status card [skip ci]"
+    return _git(root, "commit-tree", tree, "-m", message, env=env).stdout.decode().strip()
+
+
+def _lost_race(stderr: str) -> bool:
+    """A lease failure means someone published first; anything else (rules, auth) won't heal."""
+    return "stale info" in stderr or "fetch first" in stderr
 
 
 def publish(
@@ -126,17 +129,18 @@ def publish(
         old, data = read_published(root, branch, remote)
         if old:
             _check_is_status_branch(root, branch)
-        changed = False
         for name, fragment in fragments.items():
-            if not fragment:
-                continue
-            if name in data and meaningful(data[name]) == meaningful(fragment):
-                continue
-            data[name] = fragment
-            changed = True
-        if old and not changed:
+            # Unchanged apart from volatile keys: keep the published copy (no churn commits).
+            if fragment and not (name in data and meaningful(data[name]) == meaningful(fragment)):
+                data[name] = fragment
+        tree = _write_tree(root, render_all(data, cfg, root))
+        # Comparing whole trees also catches settings and template changes with the same data.
+        if (
+            old
+            and tree == _git(root, "rev-parse", f"{_PRIVATE_REF}^{{tree}}").stdout.decode().strip()
+        ):
             return "unchanged"
-        commit = _commit_files(root, render_all(data, cfg, root))
+        commit = _commit_tree(root, tree)
         if before_push:
             before_push()
         pushed = _git(
@@ -150,7 +154,11 @@ def publish(
         )
         if pushed.returncode == 0:
             return "published"
-        sleep(random.uniform(1, 3) * (attempt + 1))
+        stderr = pushed.stderr.decode(errors="replace").strip()
+        if not _lost_race(stderr):
+            raise PreconditionError(f"pushing {branch} was rejected: {stderr}")
+        if attempt < attempts - 1:
+            sleep(random.uniform(1, 3) * (attempt + 1))
     raise PreconditionError(
         f"could not publish {branch} after {attempts} attempts (lost every race)"
     )
