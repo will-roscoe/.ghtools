@@ -32,6 +32,8 @@ the workflows ghtools replaces. `ghtools deinit` undoes it.
 |---|---|
 | `ghtools init` / `deinit` | set up / undo ghtools in the repo you're in |
 | `ghtools doctor` | check settings, stub, secrets, rulesets, Pages |
+| `ghtools init --community` | also add issue forms, a PR template, CONTRIBUTING and SECURITY where missing |
+| `ghtools sync OWNER/NAME… \| --all [--dry-run]` | open a pull request updating each repo's stub when the stub contract changes |
 | `ghtools version next --explain` | what merging now would release, and why |
 | `ghtools resync` | after a push: fetch tags, fast-forward, reinstall an editable install |
 | `ghtools hooks install` | warn-only pre-push hook running the configured gates |
@@ -60,6 +62,13 @@ dispatch = { update-todo = "update-todo.yml" }
 A directive quoted in backticks (`` `[ci]` ``) is prose and does nothing. Release directives
 (`+:major`, `+:minor`, …, alone on a line) are separate and always on. `ghtools stub --write`
 adds the stub's dispatch job after you add `dispatch` entries.
+
+## Updating the stub everywhere
+
+The stub changes rarely (a new trigger, secret or publish job). When it does, `STUB_VERSION` goes up
+and every stub is out of date. Run `ghtools sync --all --dry-run` to see which repos need it, then
+`ghtools sync --all` to open one pull request per repo. Each is re-rendered from that repo's own
+settings and keeps its pinned ref; repos with an open update PR are skipped.
 
 ## Versions
 
