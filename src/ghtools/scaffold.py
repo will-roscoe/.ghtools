@@ -204,23 +204,29 @@ COMMUNITY = {
 }
 
 
-def community_files(root: Path, docs_url: str) -> dict[str, str]:
-    """The community files `root` doesn't have yet (never overwrites), rendered for this repo."""
+# These link to github.com/<owner>/<repo>, so they need a known GitHub slug.
+_NEEDS_SLUG = {"SECURITY.md", ".github/ISSUE_TEMPLATE/config.yml"}
+
+
+def community_files(
+    root: Path, docs_url: str, releases: bool = True, slug: str | None = None
+) -> dict[str, str]:
+    """The community files `root` doesn't have yet (never overwrites), rendered for this repo.
+
+    Without a GitHub slug, the files that link to the repository on GitHub are skipped."""
     root = Path(root)
-    slug = (repo_slug(root) if root.is_dir() else None) or root.name
-    values = {"repo": slug, "name": slug.split("/")[-1], "docs_url": docs_url}
-    return {
-        dest: render(tpl, **values) for tpl, dest in COMMUNITY.items() if not (root / dest).exists()
+    slug = slug or (repo_slug(root) if root.is_dir() else None)
+    values = {
+        "repo": slug or "",
+        "name": (slug or root.name).split("/")[-1],
+        "docs_url": docs_url,
+        "releases": releases,
     }
-
-
-@dataclass
-class Plan:
-    write: dict[str, str] = field(default_factory=dict)
-    remove: list[str] = field(default_factory=list)
-    keep: dict[str, str] = field(default_factory=dict)
-    archive: bool = False
-    notes: list[str] = field(default_factory=list)
+    return {
+        dest: render(tpl, **values)
+        for tpl, dest in COMMUNITY.items()
+        if not (root / dest).exists() and (slug or dest not in _NEEDS_SLUG)
+    }
 
 
 def _apply_answers(d: Detection, answers: dict[str, str]) -> None:
@@ -255,10 +261,32 @@ def _nested(values: dict[str, Any]) -> dict[str, Any]:
     return tree
 
 
-def _community_plan(root: Path, cfg: Any) -> dict[str, str]:
-    owner, _, name = (repo_slug(root) or "").partition("/")
+@dataclass
+class Plan:
+    write: dict[str, str] = field(default_factory=dict)
+    remove: list[str] = field(default_factory=list)
+    keep: dict[str, str] = field(default_factory=dict)
+    archive: bool = False
+    notes: list[str] = field(default_factory=list)
+
+
+def _community_plan(root: Path, cfg: Any, notes: list[str]) -> dict[str, str]:
+    slug = repo_slug(root)
+    owner, _, name = (slug or "").partition("/")
     docs_url = f"https://{owner}.github.io/{name}" if cfg.get("docs.pages") and name else ""
-    return community_files(root, docs_url)
+    files = community_files(root, docs_url, releases=cfg.get("release.enabled"), slug=slug)
+    if not slug:
+        notes.append(
+            "community: no GitHub 'origin' remote, so SECURITY.md and the issue-form contact "
+            "links were skipped; add the remote and re-run `ghtools init --community`"
+        )
+    elif "SECURITY.md" in files:
+        notes.append(
+            "community: SECURITY.md sends reports to GitHub private vulnerability reporting, "
+            "which is off by default; turn it on: "
+            f"gh api -X PUT repos/{slug}/private-vulnerability-reporting"
+        )
+    return files
 
 
 def make_plan(
@@ -344,7 +372,7 @@ def make_plan(
             "to the one it imports also tests it (detection can't see imports)"
         )
     if community:
-        plan.write.update(_community_plan(root, cfg))
+        plan.write.update(_community_plan(root, cfg, plan.notes))
     if pypi:
         plan.notes.append(
             "PyPI: change this project's trusted publisher to workflow `ghtools.yml`, "
@@ -411,9 +439,11 @@ def init_repo(
             existing.write_text(proposed, encoding="utf-8")
             out(f"wrote {CONFIG_PATH}")
         if community:  # a re-run can still add the community files that are missing
-            files = _community_plan(
-                root, from_dict(tomllib.loads(existing.read_text(encoding="utf-8")))
-            )
+            notes: list[str] = []
+            settings = from_dict(tomllib.loads(existing.read_text(encoding="utf-8")))
+            files = _community_plan(root, settings, notes)
+            for note in notes:
+                out(f"NOTE: {note}")
             for rel, text in files.items():
                 out(f"  + {rel}")
                 if not dry_run:

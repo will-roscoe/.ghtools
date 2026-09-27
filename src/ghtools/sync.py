@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import re
 import subprocess
 import tempfile
@@ -97,6 +98,22 @@ def sync_repo(
     run_git: Callable[[list[str], Path], str] | None,
     dry_run: bool,
 ) -> Outcome:
+    try:
+        return _sync_repo(repo, gh=gh, clone=clone, run_git=run_git, dry_run=dry_run)
+    except (GhtoolsError, subprocess.CalledProcessError) as exc:
+        # One repo's failure (API error, clone, push) never stops the others.
+        detail = getattr(exc, "stderr", None) or str(exc)
+        return Outcome(repo, "failed", str(detail).strip())
+
+
+def _sync_repo(
+    repo: str,
+    *,
+    gh: Gh,
+    clone: Callable[[str, Path], None] | None,
+    run_git: Callable[[list[str], Path], str] | None,
+    dry_run: bool,
+) -> Outcome:
     text = remote_stub(repo, gh)
     if text is None:
         return Outcome(repo, "not-set-up")
@@ -115,7 +132,10 @@ def sync_repo(
     assert clone is not None and run_git is not None
     with tempfile.TemporaryDirectory(prefix="ghtools-sync-") as tmp:
         work = Path(tmp) / "repo"
-        clone(repo, work)
+        try:
+            clone(repo, work)
+        except subprocess.CalledProcessError as exc:
+            return Outcome(repo, "failed", f"clone failed: {(exc.stderr or exc).__str__().strip()}")
         try:
             new = restub(work)
         except GhtoolsError as exc:
@@ -127,7 +147,9 @@ def sync_repo(
         try:
             run_git(["switch", "-q", "-c", branch], work)
             run_git(["commit", "-q", "-am", title], work)
-            run_git(["push", "-q", "origin", branch], work)
+            # ghtools owns this branch; one left by a closed PR or a failed `gh pr create` is
+            # simply replaced (a branch with an open PR was skipped above).
+            run_git(["push", "-q", "--force", "origin", branch], work)
         except (GhtoolsError, subprocess.CalledProcessError) as exc:
             return Outcome(repo, "failed", str(exc))
         pr = gh(
@@ -144,17 +166,21 @@ def sync_repo(
                 _pr_body(old),
             ]
         )
-    if not pr:
-        return Outcome(
-            repo, "failed", f"pushed {branch} but gh pr create failed; open the PR by hand"
-        )
+    if not pr or "url" not in pr:
+        reason = (pr or {}).get("error", "no output")
+        return Outcome(repo, "failed", f"pushed {branch} but gh pr create failed: {reason}")
     return Outcome(repo, "proposed", pr["url"])
 
 
 def real_gh(args: list[str]) -> Any:
-    from .doctor import gh_json
-
-    if args[:2] == ["pr", "create"]:
-        proc = subprocess.run(["gh", *args], capture_output=True, text=True)
-        return {"url": proc.stdout.strip()} if proc.returncode == 0 else None
-    return gh_json(args)
+    """Run gh: parsed JSON, None for an HTTP 404, and a GhtoolsError for any other failure."""
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if args[:2] == ["pr", "create"]:  # prints the URL, not JSON
+        if proc.returncode == 0:
+            return {"url": proc.stdout.strip()}
+        return {"error": proc.stderr.strip()}
+    if proc.returncode != 0:
+        if "HTTP 404" in proc.stderr:
+            return None
+        raise GhtoolsError(f"gh {' '.join(args[:2])}: {proc.stderr.strip()}")
+    return json.loads(proc.stdout) if proc.stdout.strip() else None

@@ -2,20 +2,19 @@
 
 ## Development setup
 
-```sh
-pip install -e .[dev]
-pytest
-```
+The README describes how to install [[ name ]] for development and run its checks.
 
 ## Commit messages
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): description`,
-with types such as `feat`, `fix`, `docs`, `refactor` and `test`. Releases are automatic: a `feat`
-releases a minor version, a `fix` a patch, and a breaking change (`type!:` or a `BREAKING CHANGE:`
-footer) a major one.
+with types such as `feat`, `fix`, `docs`, `refactor` and `test`.
+[% if releases %]
 
-To force a particular release, put a directive alone on a line in the commit body:
-`+:major`, `+:minor`, `+:patch`, or `+:rc` / `+:pre` / `+:prepre` for a pre-release.
+Releases are automatic: a `feat` releases a minor version, a `fix` a patch, and a breaking change
+(`type!:` or a `BREAKING CHANGE:` footer) a major one. To force a particular release, put a
+directive alone on a line in the commit body: `+:major`, `+:minor`, `+:patch`, or `+:rc` / `+:pre` /
+`+:prepre` for a pre-release.
+[% endif %]
 
 ## Pull requests
 
