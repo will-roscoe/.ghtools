@@ -161,3 +161,46 @@ def test_links_are_spaced_by_their_text(tmp_path):
     gaps = [b["x"] - a["x"] for a, b in zip(links, links[1:], strict=False)]
     assert gaps[0] < 100  # after the short "PyPI"
     assert gaps[1] >= len("Documentation") * 8.8 + 20  # room for the long label
+
+
+def test_card_details_fit_their_card(tmp_path):
+    # Review I8: 13px mono is ~7.8 px/char and a card has ~160 px for text.
+    data = {
+        **FULL,
+        "ci": {
+            **FULL["ci"],
+            "lint": {"status": "passing", "gates": ["ruff", "ruff-format", "actionlint"]},
+        },
+    }
+    cfg = config.from_dict({"ci": {"coverage": {"package": "x", "floor": 80}}, "status": {}})
+    for card in model.build_model(data, cfg, tmp_path)["cards"]:
+        assert len(card["detail"]) <= model.DETAIL_CHARS, card
+    lint = next(c for c in model.build_model(data, cfg, tmp_path)["cards"] if c["title"] == "LINT")
+    assert lint["detail"].endswith("…")
+
+
+def test_extra_columns_are_sized_by_their_text(tmp_path):
+    data = {
+        **FULL,
+        "cal": {
+            "label": "CAL",
+            "items": [
+                {"label": "Version", "value": "2026.9.1"},
+                {"label": "Next", "value": "2026.10.12"},
+            ],
+            "state": "ok",
+        },
+    }
+    cfg = _cfg(rows=["extra"], extra=["cal"])
+    (panel,) = model.build_model(data, cfg, tmp_path)["panels"]
+    first, second = panel["items"]
+    assert second["dx"] - first["dx"] >= len("2026.9.1") * 13.2  # 22px mono value
+    assert panel["x"] + panel["width"] <= 865
+
+
+def test_only_the_logo_skips_escaping(tmp_path):
+    # Review M10: any text starting "data:" was passed through unescaped.
+    data = {
+        "project": {"name": "x", "description": "data: <1% & rising", "version": "", "links": {}}
+    }
+    ET.fromstring(model.render_card(data, _cfg(), tmp_path))

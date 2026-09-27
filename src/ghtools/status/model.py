@@ -14,6 +14,25 @@ RIGHT = 865
 CARD_W, CARD_H, CARD_GAP, CARD_ROW = 190, 90, 20, 110
 PANEL_GAP, PANEL_ROW = 40, 110
 LINK_CHAR_W, LINK_GAP = 8.8, 24  # 16px sans-serif, approximate
+# Text budgets, so nothing runs past its card or into its neighbour (13px mono ≈ 7.8 px/char,
+# 22px mono ≈ 13.2 px/char, 13px sans ≈ 7.5 px/char).
+DETAIL_CHARS, VALUE_CHARS, ITEM_LABEL_CHARS = 22, 14, 16
+VALUE_CHAR_W, ITEM_LABEL_CHAR_W, ITEM_GAP = 13.2, 7.5, 24
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _extra_items(items: list[dict[str, str]]) -> tuple[list[dict[str, Any]], int]:
+    """Columns sized by their own text (a CalVer value is far wider than a SemVer one)."""
+    out, dx = [], 0.0
+    for item in items:
+        label = _clip(str(item.get("label", "")), ITEM_LABEL_CHARS)
+        value = _clip(str(item.get("value", "")), VALUE_CHARS)
+        out.append({"label": label, "value": value, "dx": int(dx)})
+        dx += max(len(label) * ITEM_LABEL_CHAR_W, len(value) * VALUE_CHAR_W) + ITEM_GAP
+    return out, int(dx)
 
 
 def wrap(text: str, width: int) -> list[str]:
@@ -149,9 +168,9 @@ def _panels(
                         {
                             "kind": "extra",
                             "label": frag.get("label", name.upper()),
-                            "items": frag["items"],
+                            "items": _extra_items(frag["items"])[0],
                             "state": frag.get("state", "ok"),
-                            "width": max(150, 90 * len(frag["items"]) + 20),
+                            "width": max(150, _extra_items(frag["items"])[1]),
                         }
                     )
     x, y = 35, top
@@ -182,6 +201,7 @@ def build_model(data: dict[str, dict[str, Any]], cfg: Config, root: Path) -> dic
     cards: list[dict[str, Any]] = []
     for i, kind in enumerate(k for k in cfg.get("status.card") if _card(k, data, cfg)):
         card = _card(kind, data, cfg)
+        card["detail"] = _clip(card["detail"], DETAIL_CHARS)
         card["x"] = 35 + (i % 4) * (CARD_W + CARD_GAP)
         card["y"] = label_y + 18 + (i // 4) * CARD_ROW
         cards.append(card)
@@ -213,7 +233,7 @@ def build_model(data: dict[str, dict[str, Any]], cfg: Config, root: Path) -> dic
 
 def _escape_model(value: Any) -> Any:
     if isinstance(value, str):
-        return value if value.startswith("data:") else escape(value)
+        return escape(value)
     if isinstance(value, list):
         return [_escape_model(v) for v in value]
     if isinstance(value, tuple):
@@ -224,4 +244,6 @@ def _escape_model(value: Any) -> Any:
 
 
 def render_card(data: dict[str, dict[str, Any]], cfg: Config, root: Path) -> str:
-    return render("status.svg.j2", **_escape_model(build_model(data, cfg, root)))
+    model = build_model(data, cfg, root)
+    # Everything is escaped except the logo, a data: URI built here from a file.
+    return render("status.svg.j2", **{**_escape_model(model), "logo": model["logo"]})

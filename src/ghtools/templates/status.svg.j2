@@ -64,8 +64,8 @@ svg { font-family: var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont,
 [% endfor %]
 [% elif p.kind == "extra" %]
 [% for item in p["items"] %]
-<text class="small text" x="[[ p.x + loop.index0 * 90 ]]" y="[[ p.y + 30 ]]">[[ item.label ]]</text>
-<text class="value mono [[ p.state if loop.first else 'muted' ]]" x="[[ p.x + loop.index0 * 90 ]]" y="[[ p.y + 58 ]]">[[ item.value ]]</text>
+<text class="small text" x="[[ p.x + item.dx ]]" y="[[ p.y + 30 ]]">[[ item.label ]]</text>
+<text class="value mono [[ p.state if loop.first else 'muted' ]]" x="[[ p.x + item.dx ]]" y="[[ p.y + 58 ]]">[[ item.value ]]</text>
 [% endfor %]
 [% endif %]
 [% endfor %]
