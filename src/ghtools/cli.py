@@ -422,5 +422,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args) or 0)
     except GhtoolsError as exc:
-        print(f"ghtools: error: {exc}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # An annotation shows on the run summary; %0A keeps multi-line messages in one.
+            message = str(exc).replace("%", "%25").replace("\n", "%0A")
+            print(f"::error::ghtools: {message}", file=sys.stderr)
+        else:
+            print(f"ghtools: error: {exc}", file=sys.stderr)
         return exc.exit_code

@@ -37,3 +37,16 @@ def test_write_github_output_outside_actions_is_an_error(monkeypatch):
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     with pytest.raises(GhtoolsError, match="GITHUB_OUTPUT"):
         write_github_output({"a": "1"})
+
+
+def test_errors_are_annotations_inside_github_actions(tmp_path, capsys, monkeypatch):
+    # Review I9: CI failures must surface as ::error annotations naming the key or file.
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/ghtools.toml").write_text('profile = "django"\n')
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert main(["-C", str(tmp_path), "config", "check"]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("::error::ghtools: profile: 'django' is not one of")
+    monkeypatch.delenv("GITHUB_ACTIONS")
+    main(["-C", str(tmp_path), "config", "check"])
+    assert capsys.readouterr().err.startswith("ghtools: error: profile:")
