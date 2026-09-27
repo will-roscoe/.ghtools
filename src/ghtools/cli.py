@@ -454,7 +454,9 @@ def _cmd_status_collect(args: Any) -> int:
         measured = "docs-coverage" in cfg.get("ci.gates")
         fragment = fr.docs_fragment(args.result, args.coverage_gate if measured else None)
     else:
-        fragment = fr.project_fragment(cfg, root, args.version or None, args.open_issues)
+        fragment = fr.project_fragment(
+            cfg, root, args.version or None, args.open_issues, args.description
+        )
     if fragment:
         _status_write(args.out, fragment)
     return 0
@@ -527,6 +529,7 @@ def _status_commands(sub: Any) -> None:
     col.add_argument("--coverage-gate", default=None)
     col.add_argument("--version", default="")
     col.add_argument("--open-issues", type=int, default=None)
+    col.add_argument("--description", default="", help="fallback when pyproject has none")
     col.set_defaults(handler=_cmd_status_collect)
     st = ss.add_parser("set", help="write a custom fragment (listed in status.extra)")
     st.add_argument("name")

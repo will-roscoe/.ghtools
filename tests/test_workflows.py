@@ -203,3 +203,8 @@ def test_status_recording_never_fails_ci():
         ]
         assert len(record) == 2, name
         assert all(s.get("continue-on-error") is True for s in record), name
+
+
+def test_status_passes_the_github_description():
+    text = (ROOT / ".github/workflows/status.yml").read_text()
+    assert "--description" in text and ".description" in text

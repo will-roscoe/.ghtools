@@ -166,3 +166,12 @@ def test_gates_that_never_ran_are_unknown_not_failing(outcome):
         [fr.leg("3.12", "ubuntu-latest", "failure", outcome, _junit(), None, True, None)], ["ruff"]
     )
     assert frag["lint"]["status"] == "unknown"
+
+
+def test_description_falls_back_to_the_github_one(tmp_path):
+    # Review M17 (spec §6.3): HACS and lint repos have no pyproject description.
+    cfg = config.from_dict({})
+    frag = fr.project_fragment(
+        cfg, tmp_path, version="1.0.0", open_issues=None, description="A HACS thing"
+    )
+    assert frag["description"] == "A HACS thing"

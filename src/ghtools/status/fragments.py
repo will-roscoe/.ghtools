@@ -160,7 +160,11 @@ def docs_fragment(result: str, coverage_gate: str | None) -> dict[str, Any]:
 
 
 def project_fragment(
-    cfg: Config, root: Path, version: str | None, open_issues: int | None
+    cfg: Config,
+    root: Path,
+    version: str | None,
+    open_issues: int | None,
+    description: str = "",
 ) -> dict[str, Any]:
     root = Path(root)
     project: dict[str, Any] = {}
@@ -182,7 +186,8 @@ def project_fragment(
         "source": "project",
         "updated": _now(),
         "name": name,
-        "description": cfg.get("status.description") or project.get("description", ""),
+        # Settings first, then pyproject, then the GitHub repository's own (HACS and lint repos).
+        "description": cfg.get("status.description") or project.get("description") or description,
         "version": (version or (tag or "")).lstrip("v"),
         "released": released,
         "open_issues": open_issues,

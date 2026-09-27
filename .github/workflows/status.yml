@@ -40,8 +40,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$OUT"
           issues="$(gh api "repos/$GITHUB_REPOSITORY" --jq .open_issues_count 2>/dev/null || true)"
+          description="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.description // ""' 2>/dev/null || true)"
           ghtools status collect ci --legs "$IN" --out "$OUT/ci.json"
-          project_args=(--version "$VERSION" --out "$OUT/project.json")
+          project_args=(--version "$VERSION" --description "$description" --out "$OUT/project.json")
           if [ -n "$issues" ]; then project_args+=(--open-issues "$issues"); fi
           ghtools status collect project "${project_args[@]}"
           if [ -f "$IN/ghtools-status-docs/docs.json" ]; then cp "$IN/ghtools-status-docs/docs.json" "$OUT/docs.json"; fi
