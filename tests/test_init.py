@@ -285,3 +285,26 @@ def test_rewritten_badges_are_published(git_repo):
     git_repo.run("remote", "add", "origin", "https://github.com/o/r.git")
     scaffold.init_repo(git_repo.path, yes=True, archive_mode="none", out=_quiet)
     assert "docstrings" in config.load(git_repo.path).get("status.badges")
+
+
+def test_init_migrates_old_sync_markers(git_repo):
+    old = "<!-- SYNC:overview START - generated from docs/_shared/overview.rst, do not edit here -->\nold\n<!-- SYNC:overview END -->\n"
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            "docs/_shared/overview.rst": "Hello.\n",
+            "README.md": old,
+            ".github/scripts/sync_readme.py": "#",
+        },
+    )
+    scaffold.init_repo(git_repo.path, yes=True, archive_mode="none", out=_quiet)
+    text = (git_repo.path / "README.md").read_text()
+    assert (
+        "<!-- ghtools:sync overview START — generated from docs/_shared/overview.rst, do not edit here -->"
+        in text
+    )
+    assert "<!-- ghtools:sync overview END -->" in text
+    assert "SYNC:overview" not in text
+    assert not (git_repo.path / ".github/scripts/sync_readme.py").exists()
+    assert config.load(git_repo.path).get("readme.block")[0]["name"] == "overview"

@@ -220,6 +220,20 @@ def _docs(root: Path, wfs: dict[str, str], wf: str, d: Detection) -> None:
         )
 
 
+def _readme(root: Path, d: Detection) -> None:
+    readme = _read(root / "README.md")
+    old = re.search(r"<!-- SYNC:(\w+) START - generated from (\S+?),", readme)
+    if old and (root / old.group(2)).is_file():
+        d.set(
+            "readme.block",
+            [{"name": old.group(1), "source": old.group(2)}],
+            "SYNC markers in README.md",
+        )
+        gates = d.values.get("ci.gates", [])
+        if "readme-sync" not in gates:
+            d.set("ci.gates", [*gates, "readme-sync"], "README sync markers")
+
+
 def detect(root: Path) -> Detection:
     root = Path(root)
     d = Detection()
@@ -232,4 +246,5 @@ def detect(root: Path) -> Detection:
     _release(root, wf, manifests, d)
     _ci(root, pyproject, wfs, wf, d)
     _docs(root, wfs, wf, d)
+    _readme(root, d)
     return d

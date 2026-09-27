@@ -211,3 +211,17 @@ def test_sphinx_without_w_is_not_strict(git_repo):
         },
     )
     assert detect(git_repo.path).values["docs.strict"] is False
+
+
+def test_protonfs_style_sync_markers_detected(git_repo):
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n[tool.ruff]\n',
+            "docs/_shared/overview.rst": "Hello.\n",
+            "README.md": "<!-- SYNC:overview START - generated from docs/_shared/overview.rst, do not edit here -->\nold\n<!-- SYNC:overview END -->\n",
+        },
+    )
+    v = detect(git_repo.path).values
+    assert v["readme.block"] == [{"name": "overview", "source": "docs/_shared/overview.rst"}]
+    assert "readme-sync" in v["ci.gates"]
