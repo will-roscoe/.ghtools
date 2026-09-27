@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 dependencies = ["jinja2>=3.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "pyyaml>=6", "actionlint-py==1.7.12.25"]
+dev = ["pytest>=8", "pytest-cov>=7.1.0", "ruff>=0.6", "pyyaml>=6", "actionlint-py==1.7.12.25"]
 
 [project.scripts]
 ghtools = "ghtools.cli:main"
