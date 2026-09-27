@@ -44,6 +44,19 @@ def _status(outcome: str) -> str:
     return "passing" if outcome.strip().lower() == "success" else "failing"
 
 
+def _gates_status(outcome: str) -> str:
+    """Only a gate step that ran has a result; skipped or cancelled gates are unknown."""
+    return {"success": "passing", "failure": "failing"}.get(outcome.strip().lower(), "")
+
+
+def _version_key(version: str) -> tuple[str, tuple[int, ...], str]:
+    """CPython first, numerically (3.9 < 3.13 < 3.13t), then other implementations (pypy3.10)."""
+    match = re.fullmatch(r"(\D*)(\d+(?:\.\d+)*)(.*)", version)
+    if not match:
+        return (version, (), "")
+    return (match.group(1), tuple(int(p) for p in match.group(2).split(".")), match.group(3))
+
+
 def parse_junit(path: Path) -> dict[str, Any]:
     empty = {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "duration_s": 0.0}
     if not Path(path).is_file():
@@ -100,7 +113,7 @@ def leg(
         "python": python,
         "runner": runner,
         "status": _status(outcome),
-        "gates": _status(gates_outcome) if gates_outcome else "",
+        "gates": _gates_status(gates_outcome),
         "tests": junit,
         "coverage": coverage,
         "canonical": canonical,
@@ -121,7 +134,7 @@ def ci_fragment(legs: list[dict[str, Any]], gates: list[str]) -> dict[str, Any]:
         slot = builds.setdefault(os_name, {})
         if slot.get(arch) != "failing":
             slot[arch] = lg["status"]
-    ordered = sorted(python, key=lambda v: [int(p) for p in v.split(".")])
+    ordered = sorted(python, key=_version_key)
     return {
         "source": "ci",
         "updated": _now(),

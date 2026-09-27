@@ -142,3 +142,27 @@ def test_custom_fragment_validates_state():
     }
     with pytest.raises(ValueError, match="state"):
         fr.custom_fragment("x", "X", [], "purple")
+
+
+def _junit(passed=1):
+    return {"passed": passed, "failed": 0, "skipped": 0, "total": passed, "duration_s": 0}
+
+
+def test_free_threaded_and_pypy_versions_sort_without_crashing():
+    # Review M11: int() on "13t" crashed, so the status never published.
+    legs = [
+        fr.leg(v, "ubuntu-latest", "success", "", _junit(), None, False, None)
+        for v in ["3.13t", "pypy3.10", "3.9", "3.13"]
+    ]
+    versions = [p["version"] for p in fr.ci_fragment(legs, [])["python"]]
+    assert versions[:3] == ["3.9", "3.13", "3.13t"]
+    assert "pypy3.10" in versions
+
+
+@pytest.mark.parametrize("outcome", ["skipped", "cancelled", ""])
+def test_gates_that_never_ran_are_unknown_not_failing(outcome):
+    # Review M12: an install failure skips the Gates step; the card said "✗ Failing".
+    frag = fr.ci_fragment(
+        [fr.leg("3.12", "ubuntu-latest", "failure", outcome, _junit(), None, True, None)], ["ruff"]
+    )
+    assert frag["lint"]["status"] == "unknown"
