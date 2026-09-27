@@ -1,0 +1,98 @@
+name: ghtools release
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        type: boolean
+        default: false
+    outputs:
+      released:
+        value: ${{ jobs.release.outputs.released }}
+      tag:
+        value: ${{ jobs.release.outputs.tag }}
+      version:
+        value: ${{ jobs.release.outputs.version }}
+      dist-artifact:
+        value: ${{ jobs.release.outputs.dist-artifact }}
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      released: ${{ steps.publish.outputs.released || 'false' }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+      dist-artifact: ghtools-dist
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Decide
+        id: decide
+        run: ghtools release decide --github-output
+      - name: Dry-run summary
+        if: inputs.dry-run
+        run: ghtools release decide --summary >> "$GITHUB_STEP_SUMMARY"
+      - name: Release commit and tag
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          branch="$(ghtools config get branch)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mapfile -t changed < <(ghtools release prepare "$VERSION")
+          if [ "${#changed[@]}" -gt 0 ]; then
+            git add -- "${changed[@]}"
+            git commit -m "chore(release): $TAG [skip ci]"
+            git pull --rebase origin "$branch"
+            if ! git push origin "HEAD:$branch"; then
+              echo "::error::Pushing the release commit to $branch was rejected. If a ruleset protects $branch, add GitHub Actions to its bypass list or set release.commit = false in .github/ghtools.toml."
+              exit 1
+            fi
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "refs/tags/$TAG"
+      - name: Build
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        run: |
+          python -m pip install --quiet build
+          ghtools release build --out dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        with:
+          name: ghtools-dist
+          path: dist/
+          if-no-files-found: ignore
+      - name: GitHub release
+        id: publish
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.decide.outputs.version }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ghtools release notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          args=("$TAG" --title "$TAG" --verify-tag)
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            args+=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+            args+=(--generate-notes)
+          fi
+          case "$TAG" in *-*) args+=(--prerelease) ;; esac
+          shopt -s nullglob
+          files=(dist/*)
+          gh release create "${args[@]}" "${files[@]}"
+          echo "released=true" >> "$GITHUB_OUTPUT"

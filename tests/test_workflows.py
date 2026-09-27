@@ -88,3 +88,16 @@ def test_actionlint_passes_with_the_builtin_ignores():
         ["bash", "-c", BUILTIN["actionlint"].run], cwd=ROOT, capture_output=True, text=True
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_release_workflow_contract():
+    doc = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    call = doc[True]["workflow_call"]
+    assert set(call["outputs"]) == {"released", "tag", "version", "dist-artifact"}
+    assert call["inputs"]["dry-run"]["type"] == "boolean"
+    job = doc["jobs"]["release"]
+    assert job["permissions"] == {"contents": "write"}
+    assert job["outputs"]["dist-artifact"] == "ghtools-dist"
+    text = (ROOT / ".github/workflows/release.yml").read_text()
+    assert "[skip ci]" in text
+    assert "git pull --rebase" in text
