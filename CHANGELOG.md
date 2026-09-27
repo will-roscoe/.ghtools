@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-27
+
+### Bug fixes
+
+- **ci**: run every pipeline job inline; nested $/ workflow calls resolve against the caller
+
 ## [1.0.0] - 2026-09-27
 
 ### Features
