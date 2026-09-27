@@ -95,15 +95,17 @@ jobs:
           OUTCOME: ${{ steps.test.outcome }}
           GATES: ${{ steps.gates.outcome }}
           CANONICAL: ${{ strategy.job-index == 0 }}
+          SUBPROJECT: ${{ matrix.subproject }}
         run: |
           args=(--python "$PY" --runner "$RUNNER" --outcome "$OUTCOME" --gates-outcome "$GATES" --out "$RUNNER_TEMP/status-leg.json")
           if [ "$CANONICAL" = "true" ]; then args+=(--canonical); fi
+          if [ -n "$SUBPROJECT" ]; then args+=(--subproject "$SUBPROJECT"); fi
           ghtools status leg "${args[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         continue-on-error: true
         with:
-          name: ghtools-status-leg-${{ matrix.python }}-${{ matrix.runner }}
+          name: ghtools-status-leg-${{ matrix.python }}-${{ matrix.runner }}${{ matrix.subproject && format('-{0}', matrix.subproject) || '' }}
           path: ${{ runner.temp }}/status-leg.json
           retention-days: 1
 

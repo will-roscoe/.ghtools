@@ -108,6 +108,7 @@ def leg(
     coverage: float | None,
     canonical: bool,
     docstrings: float | None,
+    subproject: str = "",
 ) -> dict[str, Any]:
     return {
         "python": python,
@@ -118,6 +119,7 @@ def leg(
         "coverage": coverage,
         "canonical": canonical,
         "docstrings": docstrings,
+        "subproject": subproject,
     }
 
 
@@ -135,7 +137,7 @@ def ci_fragment(legs: list[dict[str, Any]], gates: list[str]) -> dict[str, Any]:
         if slot.get(arch) != "failing":
             slot[arch] = lg["status"]
     ordered = sorted(python, key=_version_key)
-    return {
+    fragment = {
         "source": "ci",
         "updated": _now(),
         "run": run_meta(),
@@ -146,6 +148,12 @@ def ci_fragment(legs: list[dict[str, Any]], gates: list[str]) -> dict[str, Any]:
         "python": [{"version": v, "status": python[v]} for v in ordered],
         "builds": builds,
     }
+    subs = [
+        {"name": lg["subproject"], "status": lg["status"]} for lg in legs if lg.get("subproject")
+    ]
+    if subs:
+        fragment["subprojects"] = subs
+    return fragment
 
 
 def docs_fragment(result: str, coverage_gate: str | None) -> dict[str, Any]:

@@ -137,6 +137,9 @@ def extend_choices(section: str, key: str, *values: Any) -> None:
     field.choices = frozenset((field.choices or frozenset()) | set(values))
 
 
+extend_choices("status", "rows", "subprojects")  # piece D: one dot per in-tree subproject
+
+
 class Config:
     """Validated settings with every default filled in. `get` takes a dotted path."""
 

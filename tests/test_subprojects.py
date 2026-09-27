@@ -123,3 +123,69 @@ def test_python_profile_keeps_root_legs(git_repo):
     assert (
         config.export(mixed)["subprojects"] is True and config.export(plain)["subprojects"] is False
     )
+
+
+def test_submodule_status_reports_pointer_vs_remote(git_repo, tmp_path):
+    import subprocess
+
+    upstream = tmp_path / "up"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(upstream)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(upstream),
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "one",
+        ],
+        check=True,
+    )
+    git_repo.commit("feat: a")
+    git_repo.run("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(upstream), "up")
+    git_repo.run("commit", "-q", "-m", "chore(up): add")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(upstream),
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "two",
+        ],
+        check=True,
+    )
+    rows = subprojects.submodule_status(git_repo.path)
+    assert rows[0]["path"] == "up"
+    assert rows[0]["state"] == "pointer behind remote"
+
+
+def test_cli_subprojects_status_and_leg_flag(git_repo, capsys, tmp_path):
+    git_repo.commit("feat: a", {".github/ghtools.toml": UMBRELLA_TOML})
+    assert main(["-C", str(git_repo.path), "subprojects", "status"]) == 0
+    assert "no submodules" in capsys.readouterr().out
+    out = tmp_path / "leg.json"
+    args = [
+        "--python",
+        "3.12",
+        "--runner",
+        "ubuntu-latest",
+        "--outcome",
+        "success",
+        "--subproject",
+        "a",
+    ]
+    assert main(["-C", str(git_repo.path), "status", "leg", *args, "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["subproject"] == "a"

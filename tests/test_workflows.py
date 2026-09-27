@@ -236,3 +236,12 @@ def test_subproject_legs_and_tests_passed_job():
     assert "always()" in agg["if"]
     assert agg["permissions"] == {}
     assert "skipped" in agg["steps"][0]["run"]  # zero selected legs must pass
+
+
+def test_subproject_legs_have_distinct_status_artifacts():
+    # Every subproject leg shares one python and runner; upload-artifact rejects duplicate names.
+    ci = (ROOT / ".github/workflows/python-ci.yml").read_text()
+    assert "matrix.subproject && format(" in ci
+    assert (
+        '--subproject "$SUBPROJECT"' in ci.split("Record status leg")[1].split("upload-artifact")[0]
+    )

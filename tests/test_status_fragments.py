@@ -175,3 +175,34 @@ def test_description_falls_back_to_the_github_one(tmp_path):
         cfg, tmp_path, version="1.0.0", open_issues=None, description="A HACS thing"
     )
     assert frag["description"] == "A HACS thing"
+
+
+def test_ci_fragment_lists_subproject_results():
+    legs = [
+        fr.leg(
+            "3.12",
+            "ubuntu-latest",
+            "success",
+            "success",
+            {"passed": 1, "failed": 0, "skipped": 0, "total": 1, "duration_s": 0},
+            80.0,
+            True,
+            None,
+            subproject="scrapetool",
+        ),
+        fr.leg(
+            "3.12",
+            "ubuntu-latest",
+            "failure",
+            "",
+            {"passed": 0, "failed": 1, "skipped": 0, "total": 1, "duration_s": 0},
+            None,
+            False,
+            None,
+            subproject="videoapp_ng",
+        ),
+    ]
+    assert fr.ci_fragment(legs, [])["subprojects"] == [
+        {"name": "scrapetool", "status": "passing"},
+        {"name": "videoapp_ng", "status": "failing"},
+    ]

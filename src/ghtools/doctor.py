@@ -75,6 +75,43 @@ def _ruleset_findings(cfg: Config, name: str, gh: GhJson) -> list[Finding]:
     return out
 
 
+def _subproject_findings(cfg: Config, root: Path) -> list[Finding]:
+    out: list[Finding] = []
+    in_tree = [r["name"] for r in cfg.get("subprojects") if r["kind"] == "in-tree"]
+    codecov = root / "codecov.yml"
+    if in_tree and cfg.get("ci.coverage.flags") == "subproject" and codecov.is_file():
+        # ghtools doesn't own codecov.yml; say what to paste rather than editing it.
+        declared = set(
+            re.findall(r"^\s*-\s*name:\s*(\S+)", codecov.read_text(encoding="utf-8"), re.M)
+        )
+        missing = [n for n in in_tree if n not in declared]
+        if missing:
+            rows = {r["name"]: r["path"] for r in cfg.get("subprojects")}
+            yaml = "".join(f"\n    - name: {n}\n      paths: [{rows[n]}/]" for n in missing)
+            out.append(
+                Finding(
+                    "warn",
+                    f"codecov.yml has no individual_flags entry for: {', '.join(missing)}; "
+                    f"add{yaml}",
+                )
+            )
+    submodules = set(re.findall(r"^\s*path\s*=\s*(\S+)", _read(root / ".gitmodules"), re.M))
+    for git_dir in sorted(root.glob("*/.git")):
+        rel = git_dir.parent.relative_to(root).as_posix()
+        ignored = subprocess.run(["git", "check-ignore", "-q", rel], cwd=root).returncode == 0
+        if rel not in submodules and not ignored:
+            out.append(
+                Finding(
+                    "warn", f"{rel} is a nested git repo that is neither a submodule nor gitignored"
+                )
+            )
+    return out
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
 def run_checks(root: Path, gh: GhJson = gh_json) -> list[Finding]:
     root = Path(root)
     try:
@@ -82,6 +119,7 @@ def run_checks(root: Path, gh: GhJson = gh_json) -> list[Finding]:
     except ConfigError as exc:
         return [Finding("fail", str(exc))]
     out = [Finding("ok", "settings: .github/ghtools.toml is valid"), *_stub_findings(root)]
+    out += _subproject_findings(cfg, root)
 
     repo = gh(["repo", "view", "--json", "nameWithOwner,visibility"])
     if not repo:

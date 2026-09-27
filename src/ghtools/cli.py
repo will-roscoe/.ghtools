@@ -469,6 +469,7 @@ def _cmd_status_leg(args: Any) -> int:
             fr.parse_coverage_xml(root / "coverage.xml"),
             args.canonical,
             docstrings,
+            subproject=args.subproject,
         ),
     )
     return 0
@@ -558,6 +559,7 @@ def _status_commands(sub: Any) -> None:
         leg.add_argument(flag, required=True)
     leg.add_argument("--gates-outcome", default="")
     leg.add_argument("--canonical", action="store_true")
+    leg.add_argument("--subproject", default="")
     leg.set_defaults(handler=_cmd_status_leg)
     col = ss.add_parser("collect", help="build a ci, docs or project fragment")
     col.add_argument("source", choices=["ci", "docs", "project"])
@@ -610,6 +612,25 @@ def _readme_commands(sub: Any) -> None:
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--write", action="store_true")
     s.set_defaults(handler=_cmd_readme_sync)
+
+
+def _cmd_subprojects_status(args: Any) -> int:
+    from .subprojects import submodule_status
+
+    rows = submodule_status(repo_dir(args))
+    if not rows:
+        print("no submodules")
+    for row in rows:
+        print(f"{row['path']:30} {row['pointer'][:7]:8} {row['remote_head'][:7]:8} {row['state']}")
+    return 0
+
+
+@registrar
+def _subprojects_commands(sub: Any) -> None:
+    p = sub.add_parser("subprojects", help="subprojects and submodules")
+    ss = p.add_subparsers(dest="subprojects_cmd", required=True, metavar="<subcommand>")
+    st = ss.add_parser("status", help="each submodule pointer against its remote (local only)")
+    st.set_defaults(handler=_cmd_subprojects_status)
 
 
 def build_parser() -> argparse.ArgumentParser:
