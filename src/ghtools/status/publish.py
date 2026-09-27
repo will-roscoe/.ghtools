@@ -79,6 +79,17 @@ def read_published(
     return sha, data
 
 
+def _check_is_status_branch(root: Path, branch: str) -> None:
+    """Never replace a branch ghtools didn't make: it must be one parentless status commit."""
+    info = _git(root, "log", "-1", "--format=%P%x00%s", _PRIVATE_REF).stdout.decode()
+    parents, _, subject = info.strip().partition("\0")
+    if parents.strip() or not subject.startswith("chore(status):"):
+        raise PreconditionError(
+            f"refusing to replace {branch!r}: it isn't a ghtools status branch "
+            "(it has history or other commits); set status.branch to a dedicated branch"
+        )
+
+
 def _commit_files(root: Path, files: dict[str, bytes]) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
@@ -113,6 +124,8 @@ def publish(
     branch = cfg.get("status.branch")
     for attempt in range(attempts):
         old, data = read_published(root, branch, remote)
+        if old:
+            _check_is_status_branch(root, branch)
         changed = False
         for name, fragment in fragments.items():
             if not fragment:

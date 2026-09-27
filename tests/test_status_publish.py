@@ -120,3 +120,19 @@ def test_gives_up_after_attempts(git_repo, tmp_path):
             before_push=always_race,
             sleep=lambda _s: None,
         )
+
+
+def test_refuses_to_overwrite_a_branch_that_is_not_a_status_branch(git_repo, tmp_path):
+    # Review C1: a status.branch naming a real branch must never be replaced.
+    bare = _with_remote(git_repo, tmp_path)
+    git_repo.run("push", "-q", "origin", "main:work")
+    cfg = config.from_dict({"status": {"enabled": True, "branch": "work"}})
+    before = subprocess.run(
+        ["git", "--git-dir", str(bare), "rev-parse", "work"], capture_output=True, text=True
+    ).stdout
+    with pytest.raises(PreconditionError, match="refusing to replace 'work'"):
+        pub.publish(git_repo.path, {"ci": _frag("ci", coverage=1.0)}, cfg)
+    after = subprocess.run(
+        ["git", "--git-dir", str(bare), "rev-parse", "work"], capture_output=True, text=True
+    ).stdout
+    assert before == after

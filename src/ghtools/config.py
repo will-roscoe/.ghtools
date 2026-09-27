@@ -247,6 +247,10 @@ def _cross_checks(cfg: Config) -> None:
     is_pytest = words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]
     if cfg.get("ci.coverage.package") and not is_pytest:
         raise ConfigError("ci.coverage.package needs ci.test to run pytest")
+    if cfg.get("status.branch") == cfg.get("branch"):
+        raise ConfigError(
+            "status.branch: must not be the default branch (publishing replaces the whole branch)"
+        )
     for name in cfg.get("status.extra"):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
             raise ConfigError(

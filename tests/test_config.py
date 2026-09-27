@@ -221,3 +221,9 @@ def test_status_extra_fragment_names_are_validated():
         ConfigError, match=r"status\.extra: 'Bad Name' is not a valid fragment name"
     ):
         config.from_dict({"status": {"extra": ["Bad Name"]}})
+
+
+def test_status_branch_must_not_be_the_default_branch():
+    # Review C1: publishing replaces the branch with one orphan commit.
+    with pytest.raises(ConfigError, match=r"status\.branch: must not be the default branch"):
+        config.from_dict({"branch": "master", "status": {"branch": "master"}})
