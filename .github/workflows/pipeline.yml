@@ -145,4 +145,4 @@ jobs:
       contents: write
     uses: $/.github/workflows/status.yml
     with:
-      version: ${{ needs.release.outputs.version }}
+      version: ${{ needs.release.outputs.released == 'true' && needs.release.outputs.version || '' }}

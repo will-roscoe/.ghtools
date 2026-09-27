@@ -69,6 +69,7 @@ jobs:
 
       - name: Record status leg
         if: ${{ !cancelled() }}
+        continue-on-error: true  # status must never fail CI
         env:
           PY: ${{ matrix.python }}
           RUNNER: ${{ matrix.runner }}
@@ -81,6 +82,7 @@ jobs:
           ghtools status leg "${args[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
+        continue-on-error: true
         with:
           name: ghtools-status-leg-${{ matrix.python }}-${{ matrix.runner }}
           path: ${{ runner.temp }}/status-leg.json
