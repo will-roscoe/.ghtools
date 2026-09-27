@@ -96,6 +96,7 @@ SCHEMA: dict[str, dict[str, Field]] = {
         ),
         "description": Field(str, ""),
     },
+    "readme": {},  # holds only the [[readme.block]] table array
 }
 
 TABLE_ARRAYS: dict[str, dict[str, Field]] = {
@@ -103,6 +104,12 @@ TABLE_ARRAYS: dict[str, dict[str, Field]] = {
         "name": Field(str, None),
         "run": Field(str, None),
         "after": Field(str, "test", _c("test", "docs")),
+    },
+    "readme.block": {
+        "name": Field(str, None),
+        "kind": Field(str, "sync", _c("sync", "status")),
+        "source": Field(str, ""),
+        "heading-offset": Field(int, 0),
     },
 }
 
@@ -251,6 +258,19 @@ def _cross_checks(cfg: Config) -> None:
         raise ConfigError(
             "status.branch: must not be the default branch (publishing replaces the whole branch)"
         )
+    seen_blocks: set[str] = set()
+    for i, block in enumerate(cfg.get("readme.block")):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", block["name"]):
+            raise ConfigError(
+                f"readme.block[{i}].name: {block['name']!r} must match [a-z0-9][a-z0-9_-]*"
+            )
+        if block["name"] in seen_blocks:
+            raise ConfigError(f"readme.block[{i}].name: duplicate block name {block['name']!r}")
+        seen_blocks.add(block["name"])
+        if not -1 <= block["heading-offset"] <= 2:  # = - ~ map to ## ### ####; keep 1..6
+            raise ConfigError(f"readme.block[{i}].heading-offset: must be between -1 and 2")
+        if block["kind"] == "sync" and not block["source"]:
+            raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
     for name in cfg.get("status.extra"):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
             raise ConfigError(

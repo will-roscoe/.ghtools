@@ -40,7 +40,18 @@ _KEEP = r"claude-code-action|@github/copilot|resolve_directives|workflow_run:|pu
 REPLACED_SCRIPTS = [
     ".github/scripts/compute_next_version.py",
     ".github/scripts/finalize_changelog.py",
+    ".github/scripts/sync_readme.py",
 ]
+
+_OLD_START = re.compile(r"<!-- SYNC:(\w+) START - generated from (\S+?), do not edit here -->")
+_OLD_END = re.compile(r"<!-- SYNC:(\w+) END -->")
+
+
+def migrate_sync_markers(text: str) -> str:
+    from .readme import markers
+
+    text = _OLD_START.sub(lambda m: markers(m.group(1), m.group(2))[0], text)
+    return _OLD_END.sub(lambda m: markers(m.group(1), "")[1], text)
 
 
 def classify_workflow(text: str) -> tuple[str, str]:
@@ -234,6 +245,12 @@ def make_plan(
                 f"{ref_path}: not produced by ghtools, left as is; the workflow that updated it is "
                 "replaced, so update or remove that README reference"
             )
+    readme_text = plan.write.get("README.md") or (
+        readme.read_text(encoding="utf-8") if readme.is_file() else ""
+    )
+    migrated = migrate_sync_markers(readme_text) if readme_text else ""
+    if migrated and migrated != readme_text:
+        plan.write["README.md"] = migrated
     if pypi:
         plan.notes.append(
             "PyPI: change this project's trusted publisher to workflow `ghtools.yml`, "

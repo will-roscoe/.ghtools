@@ -35,6 +35,8 @@ the workflows ghtools replaces. `ghtools deinit` undoes it.
 | `ghtools version next --explain` | what merging now would release, and why |
 | `ghtools resync` | after a push: fetch tags, fast-forward, reinstall an editable install |
 | `ghtools hooks install` | warn-only pre-push hook running the configured gates |
+| `ghtools status url` / `render` | the status card's README URL / a local preview of the status branch |
+| `ghtools readme sync --check` / `--write` | check or regenerate README blocks (`[[readme.block]]`) from their single source |
 
 ## Versions
 
