@@ -91,18 +91,32 @@ BADGE_MAP = {
     "version.svg": "version",
     "interrogate-badge.svg": "docstrings",
 }
-_STATUS_REF = re.compile(
-    r"https://raw\.githubusercontent\.com/[^/\s)\"']+/[^/\s)\"']+/[^/\s)\"']+/\.github/status/status\.svg"
+# A reference is replaced whole: its raw/blob URL prefix (or ./) goes with it. The lookbehind
+# stops a bare `.github/...` inside some other URL from matching, so unknown URLs stay intact.
+_SEG = r"[^/\s)\"']+"
+_URL_PREFIX = (
+    r"(?<![\w/.-])(?:"
+    rf"https://raw\.githubusercontent\.com/{_SEG}/{_SEG}/{_SEG}/"
+    rf"|https://github\.com/{_SEG}/{_SEG}/(?:blob|raw)/{_SEG}/"
+    r"|\./)?"
 )
-_BADGE_REF = re.compile(r"(?:\./)?\.github/badges/([\w.-]+\.svg)")
+_STATUS_REF = re.compile(_URL_PREFIX + r"\.github/status/status\.svg")
+_BADGE_REF = re.compile(_URL_PREFIX + r"\.github/badges/([\w.-]+\.svg)")
 
 
-def rewrite_readme(text: str, slug: str, branch: str) -> tuple[str, list[str], list[str]]:
-    """Point README status/badge references at the status branch; leave unknown badges alone."""
+def rewrite_readme(
+    text: str, slug: str, branch: str
+) -> tuple[str, list[str], list[str], list[str]]:
+    """Point README status/badge references at the status branch; leave unknown badges alone.
+
+    Returns the new text, the references rewritten, the references left alone, and the badge
+    names the README now uses (they must be in status.badges or the images 404).
+    """
     from .status.publish import status_url
 
     done: list[str] = []
     left: list[str] = []
+    names: set[str] = set()
 
     def status_sub(match: re.Match[str]) -> str:
         done.append(match.group(0))
@@ -114,11 +128,12 @@ def rewrite_readme(text: str, slug: str, branch: str) -> tuple[str, list[str], l
             left.append(f".github/badges/{match.group(1)}")
             return match.group(0)
         done.append(match.group(0))
+        names.add(name)
         return status_url(slug, branch, f"badges/{name}.svg")
 
     text = _STATUS_REF.sub(status_sub, text)
     text = _BADGE_REF.sub(badge_sub, text)
-    return text, done, sorted(set(left))
+    return text, done, sorted(set(left)), sorted(names)
 
 
 @dataclass
@@ -204,11 +219,16 @@ def make_plan(
     readme = root / "README.md"
     slug = repo_slug(root)
     if readme.is_file() and slug:
-        new_text, done, left = rewrite_readme(
+        new_text, done, left, names = rewrite_readme(
             readme.read_text(encoding="utf-8"), slug, cfg.get("status.branch")
         )
         if done:
             plan.write["README.md"] = new_text
+        missing = [n for n in names if n not in cfg.get("status.badges")]
+        if missing:
+            d.set("status.badges", [*cfg.get("status.badges"), *missing], "badges the README uses")
+            cfg = from_dict(_nested(d.values))
+            plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
         for ref_path in left:
             plan.notes.append(
                 f"{ref_path}: not produced by ghtools, left as is; the workflow that updated it is "

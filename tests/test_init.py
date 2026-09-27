@@ -212,7 +212,9 @@ README = """<img src="https://raw.githubusercontent.com/will-roscoe/protonfs/mai
 
 
 def test_rewrite_readme_maps_known_badges_and_leaves_others():
-    text, done, left = scaffold.rewrite_readme(README, "will-roscoe/protonfs", "ghtools-status")
+    text, done, left, _names = scaffold.rewrite_readme(
+        README, "will-roscoe/protonfs", "ghtools-status"
+    )
     assert "https://github.com/will-roscoe/protonfs/raw/ghtools-status/status.svg" in text
     assert "https://github.com/will-roscoe/protonfs/raw/ghtools-status/badges/coverage.svg" in text
     assert "./.github/badges/build-linux-x64.svg" in text
@@ -245,3 +247,41 @@ def test_init_enables_status_and_removes_replaced_status_files(git_repo):
     readme = (git_repo.path / "README.md").read_text()
     assert "https://github.com/o/r/raw/ghtools-status/badges/coverage.svg" in readme
     assert any("proton-drive.svg" in line and "left as is" in line for line in lines)
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "https://raw.githubusercontent.com/o/r/main/.github/badges/coverage.svg",
+        "https://github.com/o/r/blob/main/.github/badges/coverage.svg",
+        "https://github.com/o/r/raw/main/.github/badges/coverage.svg",
+        "./.github/badges/coverage.svg",
+        ".github/badges/coverage.svg",
+    ],
+)
+def test_rewrite_replaces_whole_badge_urls(ref):
+    # Review I6: an absolute URL must be replaced whole, not have a URL spliced into its middle.
+    text, done, _left, names = scaffold.rewrite_readme(f"![c]({ref})\n", "o/r", "ghtools-status")
+    assert text == "![c](https://github.com/o/r/raw/ghtools-status/badges/coverage.svg)\n"
+    assert names == ["coverage"]
+
+
+@pytest.mark.parametrize("ref", [".github/status/status.svg", "./.github/status/status.svg"])
+def test_rewrite_handles_relative_status_card(ref):
+    text, *_ = scaffold.rewrite_readme(f'<img src="{ref}">\n', "o/r", "ghtools-status")
+    assert text == '<img src="https://github.com/o/r/raw/ghtools-status/status.svg">\n'
+
+
+def test_rewritten_badges_are_published(git_repo):
+    # Review I5: a README pointed at badges/docstrings.svg needs "docstrings" in status.badges.
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            ".github/badges/interrogate-badge.svg": "<svg/>",
+            "README.md": "![d](.github/badges/interrogate-badge.svg)\n",
+        },
+    )
+    git_repo.run("remote", "add", "origin", "https://github.com/o/r.git")
+    scaffold.init_repo(git_repo.path, yes=True, archive_mode="none", out=_quiet)
+    assert "docstrings" in config.load(git_repo.path).get("status.badges")
