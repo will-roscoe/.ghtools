@@ -231,3 +231,12 @@ def test_subprojects_panel(tmp_path):
     assert [p["kind"] for p in m["panels"]] == ["subprojects"]
     svg = model.render_card(data, cfg, tmp_path)
     assert "videoapp_ng" in svg
+
+
+def test_not_run_subprojects_are_muted_not_red(tmp_path):
+    data = {
+        "project": {"name": "p", "description": "", "version": "", "links": {}},
+        "ci": {"subprojects": [{"name": "c", "status": "not run"}]},
+    }
+    svg = model.render_card(data, config.from_dict({"status": {"rows": ["subprojects"]}}), tmp_path)
+    assert 'class="muted"' in svg and 'class="fail"' not in svg

@@ -206,3 +206,38 @@ def test_ci_fragment_lists_subproject_results():
         {"name": "scrapetool", "status": "passing"},
         {"name": "videoapp_ng", "status": "failing"},
     ]
+
+
+def _sub_leg(name, outcome, passed):
+    t = {
+        "passed": passed,
+        "failed": 0 if outcome == "success" else 1,
+        "skipped": 0,
+        "total": passed + 1,
+        "duration_s": 1.0,
+    }
+    return fr.leg("3.12", "ubuntu-latest", outcome, "", t, None, False, None, subproject=name)
+
+
+def test_partial_runs_keep_the_other_subprojects_last_results():
+    # Review D-I7: each run only tests the subprojects a change touched; the card must not flap.
+    previous = fr.ci_fragment(
+        [_sub_leg("a", "success", 5), _sub_leg("b", "failure", 3)], [], in_tree=["a", "b", "c"]
+    )
+    now = fr.ci_fragment(
+        [_sub_leg("a", "success", 6)], [], previous=previous, in_tree=["a", "b", "c"]
+    )
+    assert now["subprojects"] == [
+        {"name": "a", "status": "passing"},
+        {"name": "b", "status": "failing"},
+        {"name": "c", "status": "not run"},
+    ]
+    # An umbrella has no root leg: the TESTS card sums every subproject's latest results.
+    assert now["tests"]["passed"] == 6 + 3
+    assert now["coverage"] is None
+
+
+def test_a_subproject_dropped_from_the_settings_is_not_carried():
+    previous = fr.ci_fragment([_sub_leg("old", "success", 1)], [], in_tree=["old"])
+    now = fr.ci_fragment([_sub_leg("a", "success", 1)], [], previous=previous, in_tree=["a"])
+    assert [s["name"] for s in now["subprojects"]] == ["a"]

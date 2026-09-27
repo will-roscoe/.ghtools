@@ -65,7 +65,7 @@ svg { font-family: var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont,
 [% elif p.kind == "subprojects" %]
 [% for sp in p["items"] %]
 <text class="small text" x="[[ p.x + 10 + loop.index0 * 70 ]]" y="[[ p.y + 30 ]]" text-anchor="middle">[[ sp.name ]]</text>
-<circle cx="[[ p.x + 10 + loop.index0 * 70 ]]" cy="[[ p.y + 55 ]]" r="8" class="[[ 'pass' if sp.status == 'passing' else 'fail' ]]"/>
+<circle cx="[[ p.x + 10 + loop.index0 * 70 ]]" cy="[[ p.y + 55 ]]" r="8" class="[[ 'pass' if sp.status == 'passing' else ('fail' if sp.status == 'failing' else 'muted') ]]"/>
 [% endfor %]
 [% elif p.kind == "extra" %]
 [% for item in p["items"] %]

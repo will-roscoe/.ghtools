@@ -487,6 +487,17 @@ def _cmd_status_leg(args: Any) -> int:
     return 0
 
 
+def _published_ci(root: Path, cfg: Any) -> dict[str, Any] | None:
+    """The CI fragment already on the status branch, or None when there's none to read."""
+    from .errors import PreconditionError
+    from .status.publish import read_published
+
+    try:
+        return read_published(root, cfg.get("status.branch"))[1].get("ci")
+    except PreconditionError:
+        return None
+
+
 def _cmd_status_collect(args: Any) -> int:
     from .status import fragments as fr
 
@@ -499,7 +510,9 @@ def _cmd_status_collect(args: Any) -> int:
             else []
         )
         legs = [lg for lg in legs if "python" in lg]  # skip other artifacts' JSON (docs.json)
-        fragment = fr.ci_fragment(legs, cfg.get("ci.gates"))
+        in_tree = [row["name"] for row in _config.in_tree(cfg)]
+        previous = _published_ci(root, cfg) if in_tree else None
+        fragment = fr.ci_fragment(legs, cfg.get("ci.gates"), previous=previous, in_tree=in_tree)
     elif args.source == "docs":
         # Only the docs-coverage gate measures documentation; other docs gates passing says nothing.
         measured = "docs-coverage" in cfg.get("ci.gates")
