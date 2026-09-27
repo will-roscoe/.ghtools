@@ -172,3 +172,42 @@ def test_lint_like_without_releases(git_repo):
     assert v["profile"] == "lint"
     assert v["release.enabled"] is False
     assert v["ci.gates"] == ["shellcheck"]
+
+
+BASH_HELPERS = {
+    "Makefile": "docs:\n\ttrue\n",
+    "x.sh": "echo\n",
+    "docs/conf.py": "",
+    ".github/workflows/pages.yml": (
+        "jobs:\n  b:\n    steps:\n      - run: pip install -r docs/requirements.txt\n"
+        "      - run: make docs\n"
+        "      - run: python -m sphinx -b html docs docs/_build/html --fail-on-warning\n"
+        "      - uses: actions/deploy-pages@v4\n"
+    ),
+    ".github/workflows/docs-check.yml": (
+        "jobs:\n  c:\n    steps:\n      - run: |\n          sudo apt-get install -y -qq shellcheck\n          make lint\n          make validate\n"
+        "      - run: make docs\n      - run: |\n          if ! git diff --quiet -- docs/; then exit 1; fi\n"
+    ),
+}
+
+
+def test_bash_helpers_like_docs_settings(git_repo):
+    # Review I10: no pyproject, docs installed from requirements, generated before Sphinx.
+    git_repo.commit("feat: init", BASH_HELPERS)
+    v = detect(git_repo.path).values
+    assert v["docs.install"] == "-r docs/requirements.txt"
+    assert v["docs.prebuild"] == ["make docs"]
+    assert v["docs.strict"] is True  # --fail-on-warning
+    assert "docs.apt" not in v  # docs-check's `apt-get install shellcheck` is not a docs dependency
+
+
+def test_sphinx_without_w_is_not_strict(git_repo):
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            "doc/conf.py": "",
+            ".github/workflows/docs.yml": "jobs:\n  d:\n    steps:\n      - run: sphinx-build --keep-going -b html doc/ doc/_build/html\n",
+        },
+    )
+    assert detect(git_repo.path).values["docs.strict"] is False

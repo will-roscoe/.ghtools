@@ -28,7 +28,7 @@ STUB_REF = "v1"
 # What ghtools now does for a workflow that contains one of these (checked in order).
 _REPLACED: list[tuple[str, str]] = [
     (r"compute_next_version|gh release create|softprops/action-gh-release", "release"),
-    (r"sphinx-build", "docs"),
+    (r"sphinx-build|python -m sphinx|deploy-pages", "docs"),
     (r"hacs/action|hassfest", "HACS validation"),
     (r"\bpytest\b|ruff check|ruff-action|ruff format", "CI tests and lint"),
     (r"yamllint|shellcheck", "lint gates"),
@@ -50,6 +50,32 @@ def classify_workflow(text: str) -> tuple[str, str]:
         if re.search(pattern, text):
             return "replace", f"ghtools {what}"
     return "keep", "not covered by ghtools"
+
+
+_MAKE_STEP = re.compile(r"^\s*(?:-\s*run:\s*)?make ([\w-]+)\s*$", re.M)
+_FRESH_CHECK = re.compile(r"git diff --quiet -- (\S+?);?\s")
+
+
+def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str, str]]:
+    """Keep the `make` checks of workflows ghtools replaces, as custom gates.
+
+    A workflow that runs `make docs` and then `git diff --quiet -- <dir>` is a docs-freshness
+    check and becomes one `docs-fresh` gate. `make` steps that are the docs prebuild are not gates.
+    """
+    gates: dict[str, dict[str, str]] = {}
+    for text in texts:
+        targets = _MAKE_STEP.findall(text)
+        fresh = _FRESH_CHECK.search(text)
+        if fresh and "docs" in targets:
+            run = f"make docs && git diff --quiet -- {fresh.group(1)}"
+            gates.setdefault("docs-fresh", {"name": "docs-fresh", "run": run, "after": "test"})
+            targets = [t for t in targets if t != "docs"]
+        for target in targets:
+            if f"make {target}" in prebuild:
+                continue
+            name = f"make-{target}"
+            gates.setdefault(name, {"name": name, "run": f"make {target}", "after": "test"})
+    return list(gates.values())
 
 
 def render_stub(branch: str, pypi: bool, ref: str = STUB_REF) -> str:
@@ -102,21 +128,27 @@ def make_plan(
 ) -> tuple[Plan, Detection]:
     d = detect(root)
     _apply_answers(d, answers)
-    cfg = from_dict(_nested(d.values))  # validates the proposal before anything is written
     plan = Plan(archive=archive_mode == "snapshot" and (root / ".github").is_dir())
-    plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
-    pypi = "pypi" in cfg.get("release.publish")
-    plan.write[STUB_PATH] = render_stub(cfg.get("branch"), pypi, ref)
+    replaced_texts: list[str] = []
     wf_dir = root / ".github/workflows"
     for path in sorted([*wf_dir.glob("*.yml"), *wf_dir.glob("*.yaml")]):
         rel = path.relative_to(root).as_posix()
         if rel == STUB_PATH:
             continue
-        verdict, why = classify_workflow(path.read_text(encoding="utf-8", errors="replace"))
+        text = path.read_text(encoding="utf-8", errors="replace")
+        verdict, why = classify_workflow(text)
         if verdict == "replace" and not keep_old:
             plan.remove.append(rel)
+            replaced_texts.append(text)
         else:
             plan.keep[rel] = why if verdict == "keep" else f"kept by --keep-old ({why})"
+    gates = gates_from_replaced(replaced_texts, d.values.get("docs.prebuild", []))
+    if gates and "ci.gate" not in d.values:
+        d.set("ci.gate", gates, "make steps in the workflows ghtools replaces")
+    cfg = from_dict(_nested(d.values))  # validates the proposal before anything is written
+    plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
+    pypi = "pypi" in cfg.get("release.publish")
+    plan.write[STUB_PATH] = render_stub(cfg.get("branch"), pypi, ref)
     if not keep_old:
         plan.remove += [s for s in REPLACED_SCRIPTS if (root / s).is_file()]
     if pypi:

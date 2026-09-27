@@ -19,7 +19,9 @@ def html_dir(cfg: Config) -> str:
 
 def build_commands(cfg: Config) -> list[list[str]]:
     root = cfg.get("docs.dir")
-    commands: list[list[str]] = []
+    commands: list[list[str]] = [
+        ["bash", "-o", "pipefail", "-c", c] for c in cfg.get("docs.prebuild")
+    ]
     apidoc = cfg.get("docs.apidoc")
     if apidoc:
         out = f"{root}/api/{Path(apidoc).name}"

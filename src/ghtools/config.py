@@ -74,6 +74,7 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "strict": Field(bool, True),
         "pages": Field(bool, False),
         "apt": Field(list, []),
+        "prebuild": Field(list, []),  # commands run before sphinx-build (e.g. generated sources)
     },
 }
 

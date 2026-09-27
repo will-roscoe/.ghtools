@@ -189,3 +189,17 @@ def test_rerun_write_never_deletes_existing_keys(git_repo):
     cfg = config.load(git_repo.path)
     assert cfg.get("ci.install") == "pytest pyyaml voluptuous"
     assert cfg.get("ci.python") == ["3.13"]
+
+
+def test_replaced_workflows_keep_their_make_checks_as_gates(git_repo):
+    from test_detect import BASH_HELPERS
+
+    git_repo.commit("feat: init", BASH_HELPERS)
+    scaffold.init_repo(git_repo.path, yes=True, archive_mode="none", out=_quiet)
+    assert not (git_repo.path / ".github/workflows/pages.yml").exists()  # ghtools deploys Pages now
+    gates = {g["name"]: g["run"] for g in config.load(git_repo.path).get("ci.gate")}
+    assert gates == {
+        "make-lint": "make lint",
+        "make-validate": "make validate",
+        "docs-fresh": "make docs && git diff --quiet -- docs/",
+    }

@@ -30,6 +30,9 @@ class Detection:
         self.evidence[key] = why
 
 
+_SPHINX = re.compile(r"(?:sphinx-build|python -m sphinx)\b[^\n]*")
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
 
@@ -163,7 +166,7 @@ def _ci(root: Path, pyproject: str, wfs: dict[str, str], wf: str, d: Detection) 
         d.set("ci.docker", True, "Dockerfile + docker build step")
 
 
-def _docs(root: Path, wf: str, d: Detection) -> None:
+def _docs(root: Path, wfs: dict[str, str], wf: str, d: Detection) -> None:
     found = [p for p in ("docs", "doc") if (root / p / "conf.py").is_file()]
     if not found:
         return
@@ -187,12 +190,34 @@ def _docs(root: Path, wf: str, d: Detection) -> None:
         d.set("docs.apidoc", apidoc.group(1).rstrip("/"), "sphinx-apidoc in docs workflow")
     if "deploy-pages" in wf:
         d.set("docs.pages", True, "actions/deploy-pages in workflows")
-    apt = re.search(r"apt-get install -y ((?:[\w.+-]+ ?)+)", wf)
+    docs_wf = next((t for t in wfs.values() if _SPHINX.search(t)), "")
+    apt = re.search(r"apt-get install -y ((?:[\w.+-]+ ?)+)", docs_wf)
     if apt:
         d.set("docs.apt", [p for p in apt.group(1).split() if not p.startswith("-")], "apt-get")
     install = re.search(r"pip install -e [\"']?(\.\[docs\])[\"']?", wf)
     if install:
         d.set("docs.install", install.group(1), "pip install in docs workflow")
+    else:
+        other = re.search(r"pip install (?!-e\b)((?:-r \S+)|[\w.\[\],=<>\- ]+?)\s*$", docs_wf, re.M)
+        if other:
+            d.set("docs.install", other.group(1).strip(), "pip install in docs workflow")
+        elif not (root / "pyproject.toml").is_file():
+            d.set("docs.install", "sphinx", "no pyproject.toml to install docs extras from")
+    sphinx = _SPHINX.search(docs_wf)
+    if sphinx:
+        # `make X` steps before the Sphinx call generate sources it needs (bash-helpers: argdoc).
+        before = docs_wf[: sphinx.start()]
+        prebuild = [
+            f"make {t}" for t in re.findall(r"^\s*(?:-\s*)?run:\s*make ([\w-]+)\s*$", before, re.M)
+        ]
+        if prebuild:
+            d.set("docs.prebuild", prebuild, "make steps before the Sphinx build")
+        strict = bool(re.search(r"(?:\s-W\b|--fail-on-warning)", sphinx.group(0)))
+        d.set(
+            "docs.strict",
+            strict,
+            f"{'warnings fail' if strict else 'warnings allowed'} in the existing Sphinx call",
+        )
 
 
 def detect(root: Path) -> Detection:
@@ -206,5 +231,5 @@ def detect(root: Path) -> Detection:
     _version(root, pyproject, wf, manifests, d)
     _release(root, wf, manifests, d)
     _ci(root, pyproject, wfs, wf, d)
-    _docs(root, wf, d)
+    _docs(root, wfs, wf, d)
     return d
