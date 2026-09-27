@@ -3,9 +3,17 @@ on:
   workflow_call:
     inputs:
       matrix:
-        description: JSON {"include":[{"python":..,"runner":..}]} from `ghtools config export`
+        description: JSON {"include":[{"python":..,"runner":..,"subproject"?:..}]} from `ghtools ci matrix`
         type: string
         required: true
+      tests:
+        description: false when the change selects no legs (the matrix then holds a placeholder)
+        type: boolean
+        default: true
+      gates:
+        description: run the test-stage gates in the first leg (umbrella repos run them in lint-ci)
+        type: boolean
+        default: true
       codecov:
         type: boolean
         default: false
@@ -23,7 +31,8 @@ permissions: {}
 
 jobs:
   test:
-    name: test (${{ matrix.python }}, ${{ matrix.runner }})
+    name: test (${{ matrix.subproject || matrix.python }}, ${{ matrix.runner }})
+    if: inputs.tests
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -36,11 +45,19 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+      - name: Setup (subproject)
+        if: matrix.subproject
+        env:
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: ghtools ci setup --subproject "$SUBPROJECT"
       - name: Install
-        run: ghtools ci install
+        env:
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: |
+          if [ -n "$SUBPROJECT" ]; then ghtools ci install --subproject "$SUBPROJECT"; else ghtools ci install; fi
       - name: Gates
         id: gates
-        if: strategy.job-index == 0
+        if: strategy.job-index == 0 && inputs.gates
         run: |
           ghtools gates install --stage test
           ghtools gates run --stage test
@@ -49,7 +66,10 @@ jobs:
         # Runs even if a gate failed, so coverage and test results always report;
         # the failed gate still fails the job.
         if: ${{ !cancelled() }}
-        run: ghtools ci test
+        env:
+          SUBPROJECT: ${{ matrix.subproject }}
+        run: |
+          if [ -n "$SUBPROJECT" ]; then ghtools ci test --subproject "$SUBPROJECT"; else ghtools ci test; fi
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && inputs.codecov }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -57,7 +77,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           disable_search: true
-          flags: ${{ inputs.flags == 'python-version' && format('py{0}', matrix.python) || '' }}
+          flags: ${{ inputs.flags == 'subproject' && matrix.subproject || (inputs.flags == 'python-version' && format('py{0}', matrix.python) || '') }}
       - name: Upload test results to Codecov
         if: ${{ !cancelled() && inputs.codecov }}
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
@@ -65,8 +85,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: junit.xml
           disable_search: true
-          flags: ${{ inputs.flags == 'python-version' && format('py{0}', matrix.python) || '' }}
-
+          flags: ${{ inputs.flags == 'subproject' && matrix.subproject || (inputs.flags == 'python-version' && format('py{0}', matrix.python) || '') }}
       - name: Record status leg
         if: ${{ !cancelled() }}
         continue-on-error: true  # status must never fail CI
@@ -87,6 +106,21 @@ jobs:
           name: ghtools-status-leg-${{ matrix.python }}-${{ matrix.runner }}
           path: ${{ runner.temp }}/status-leg.json
           retention-days: 1
+
+  tests-passed:
+    # One stable check name for branch protection: passes when every selected leg passed,
+    # or when nothing needed testing (a docs-only change in an umbrella repo).
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: |
+          echo "tests: $RESULT"
+          [ "$RESULT" = success ] || [ "$RESULT" = skipped ]
 
   docker:
     if: inputs.docker

@@ -208,3 +208,28 @@ def test_status_recording_never_fails_ci():
 def test_status_passes_the_github_description():
     text = (ROOT / ".github/workflows/status.yml").read_text()
     assert "--description" in text and ".description" in text
+
+
+def test_config_job_computes_the_matrix_for_the_change():
+    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    step = next(s for s in doc["jobs"]["config"]["steps"] if s.get("id") == "matrix")
+    assert "ghtools ci matrix" in step["run"] and "--github-output" in step["run"]
+    assert "pull_request.base.sha" in step["env"]["BASE"]
+    ci_python = doc["jobs"]["ci-python"]
+    assert ci_python["with"]["matrix"] == "${{ needs.config.outputs.matrix }}"
+    assert "needs.config.outputs.any" in ci_python["with"]["tests"]
+    assert "subprojects" in ci_python["if"]  # umbrella repos with in-tree subprojects use python-ci
+    assert "'python'" in ci_python["with"]["gates"]  # umbrella gates stay in ci-lint, run once
+
+
+def test_subproject_legs_and_tests_passed_job():
+    doc = yaml.safe_load((ROOT / ".github/workflows/python-ci.yml").read_text())
+    text = (ROOT / ".github/workflows/python-ci.yml").read_text()
+    assert "--subproject" in text and "ghtools ci setup" in text
+    assert doc["jobs"]["test"]["if"] == "inputs.tests"
+    assert "inputs.gates" in next(s for s in doc["jobs"]["test"]["steps"] if s.get("name") == "Gates")["if"]
+    assert "matrix.subproject" in doc["jobs"]["test"]["name"]
+    agg = doc["jobs"]["tests-passed"]
+    assert "always()" in agg["if"]
+    assert agg["permissions"] == {}
+    assert "skipped" in agg["steps"][0]["run"]  # zero selected legs must pass
