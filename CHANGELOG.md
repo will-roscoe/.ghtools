@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-27
+
+### Bug fixes
+
+- **init**: point README badges of replaced workflows at the ghtools stub
+
 ## [1.0.1] - 2026-09-27
 
 ### Bug fixes
