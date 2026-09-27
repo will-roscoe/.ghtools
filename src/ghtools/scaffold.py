@@ -90,8 +90,8 @@ def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str,
     return list(gates.values())
 
 
-def render_stub(branch: str, pypi: bool, ref: str = STUB_REF) -> str:
-    return render("stub.yml.j2", branch=branch, pypi=pypi, ref=ref)
+def render_stub(branch: str, pypi: bool, ref: str = STUB_REF, dispatch: bool = False) -> str:
+    return render("stub.yml.j2", branch=branch, pypi=pypi, ref=ref, dispatch=dispatch)
 
 
 BADGE_MAP = {
@@ -214,7 +214,9 @@ def make_plan(
     cfg = from_dict(_nested(d.values))  # validates the proposal before anything is written
     plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
     pypi = "pypi" in cfg.get("release.publish")
-    plan.write[STUB_PATH] = render_stub(cfg.get("branch"), pypi, ref)
+    plan.write[STUB_PATH] = render_stub(
+        cfg.get("branch"), pypi, ref, dispatch=bool(cfg.get("directives.dispatch"))
+    )
     if not keep_old:
         plan.remove += [s for s in REPLACED_SCRIPTS if (root / s).is_file()]
         status_dir = root / ".github/status"

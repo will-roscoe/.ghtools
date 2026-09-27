@@ -1,0 +1,31 @@
+name: ghtools dispatch
+on:
+  workflow_call:
+    inputs:
+      workflows:
+        description: JSON list of workflow files in the caller repository
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOWS: ${{ inputs.workflows }}
+          REF: ${{ github.ref_name }}
+        run: |
+          # `config check` only accepts plain *.yml file names, so word-splitting is safe.
+          for wf in $(jq -r '.[]' <<<"$WORKFLOWS"); do
+            if gh workflow run "$wf" --repo "$GITHUB_REPOSITORY" --ref "$REF"; then
+              echo "started $wf on $REF"
+            else
+              echo "::warning::could not start $wf (does it exist, with a workflow_dispatch trigger?)"
+            fi
+          done

@@ -321,3 +321,13 @@ def test_init_notes_needs_for_several_subprojects(git_repo):
     )
     plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1")
     assert any("needs = [" in note for note in plan.notes)
+
+
+def test_stub_dispatch_job_only_when_configured():
+    plain = scaffold.render_stub("main", pypi=False)
+    assert "dispatch.yml@" not in plain and "actions: write" not in plain
+    stub = yaml.safe_load(scaffold.render_stub("main", pypi=False, dispatch=True))
+    job = stub["jobs"]["dispatch"]
+    assert job["permissions"] == {"actions": "write"}
+    assert job["uses"].endswith("/.github/workflows/dispatch.yml@v1")
+    assert "actions" not in stub["permissions"]  # granted to that one job only
