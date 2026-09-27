@@ -6,6 +6,30 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-27
+
+### Features
+
+- **subprojects**: add [[subprojects]] settings with dependency validation
+- **subprojects**: select the subprojects a change touches and build the CI matrix
+- **subprojects**: per-subproject install, setup and test commands
+- **subprojects**: detect in-tree subprojects and submodules
+- **subprojects**: status row, submodule pointer status and doctor checks
+
+### Bug fixes
+
+- **subprojects**: detect umbrellas and checked-out submodules correctly, with one .gitmodules parser
+- **subprojects**: legs install their test extras, needed siblings and pytest; setup after install
+- **status**: subprojects keep their latest result across partial runs
+
+### CI
+
+- **subprojects**: per-change matrix, subproject legs and a tests-passed check
+
+### Style
+
+- **tests**: format the subproject workflow test
+
 ## [0.3.0] - 2026-09-27
 
 ### Features
