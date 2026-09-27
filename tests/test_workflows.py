@@ -227,7 +227,10 @@ def test_subproject_legs_and_tests_passed_job():
     text = (ROOT / ".github/workflows/python-ci.yml").read_text()
     assert "--subproject" in text and "ghtools ci setup" in text
     assert doc["jobs"]["test"]["if"] == "inputs.tests"
-    assert "inputs.gates" in next(s for s in doc["jobs"]["test"]["steps"] if s.get("name") == "Gates")["if"]
+    assert (
+        "inputs.gates"
+        in next(s for s in doc["jobs"]["test"]["steps"] if s.get("name") == "Gates")["if"]
+    )
     assert "matrix.subproject" in doc["jobs"]["test"]["name"]
     agg = doc["jobs"]["tests-passed"]
     assert "always()" in agg["if"]
