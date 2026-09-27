@@ -436,3 +436,30 @@ def test_no_github_remote_skips_link_bearing_community_files(git_repo):
     assert "SECURITY.md" not in plan.write and ".github/ISSUE_TEMPLATE/config.yml" not in plan.write
     assert "CONTRIBUTING.md" in plan.write
     assert any("no GitHub 'origin'" in n for n in plan.notes)
+
+
+def test_badges_of_replaced_workflows_point_at_the_stub(git_repo):
+    # intercom, ios2ha-camera and sph-dev link GitHub's workflow badge for workflows init removes.
+    readme = (
+        "[![Validate](https://github.com/o/r/actions/workflows/validate.yaml/badge.svg)]"
+        "(https://github.com/o/r/actions/workflows/validate.yaml)\n"
+        "[![Other](https://github.com/o/r/actions/workflows/claude.yml/badge.svg)](x)\n"
+    )
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            ".github/workflows/validate.yaml": CI,
+            ".github/workflows/claude.yml": CLAUDE,
+            "README.md": readme,
+        },
+    )
+    git_repo.run("remote", "add", "origin", "https://github.com/o/r.git")
+    plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1")
+    text = plan.write["README.md"]
+    assert (
+        "actions/workflows/ghtools.yml/badge.svg)](https://github.com/o/r/actions/workflows/ghtools.yml)"
+        in text
+    )
+    assert "validate.yaml" not in text
+    assert "actions/workflows/claude.yml/badge.svg" in text  # kept workflow: untouched

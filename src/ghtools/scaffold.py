@@ -126,6 +126,18 @@ _STATUS_REF = re.compile(_URL_PREFIX + r"\.github/status/status\.svg")
 _BADGE_REF = re.compile(_URL_PREFIX + r"\.github/badges/([\w.-]+\.svg)")
 
 
+def rewrite_workflow_badges(text: str, slug: str, replaced: list[str]) -> str:
+    """Point GitHub's badge and link for each workflow init replaces at the ghtools stub."""
+    for name in replaced:
+        old = f"github.com/{slug}/actions/workflows/{name}"
+        text = re.sub(
+            re.escape(old) + r"(?=[/)?\s\"']|$)",
+            f"github.com/{slug}/actions/workflows/ghtools.yml",
+            text,
+        )
+    return text
+
+
 def rewrite_readme(
     text: str, slug: str, branch: str
 ) -> tuple[str, list[str], list[str], list[str]]:
@@ -347,8 +359,10 @@ def make_plan(
         new_text, done, left, names = rewrite_readme(
             readme.read_text(encoding="utf-8"), slug, cfg.get("status.branch")
         )
-        if done:
-            plan.write["README.md"] = new_text
+        replaced = [Path(r).name for r in plan.remove if r.startswith(".github/workflows/")]
+        badged = rewrite_workflow_badges(new_text, slug, replaced)
+        if done or badged != new_text:
+            plan.write["README.md"] = badged
         missing = [n for n in names if n not in cfg.get("status.badges")]
         if missing:
             d.set("status.badges", [*cfg.get("status.badges"), *missing], "badges the README uses")
