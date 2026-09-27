@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from ghtools.cli import main
 
 TOML = '[status]\nenabled = true\nextra = ["proton-drive"]\n'
@@ -118,3 +120,13 @@ def test_collect_ci_ignores_non_leg_json(git_repo, tmp_path):
         == 0
     )
     assert [p["version"] for p in json.loads(out.read_text())["python"]] == ["3.12"]
+
+
+@pytest.mark.parametrize(("gates", "expected"), [("[]", None), ('["docs-coverage"]', 100.0)])
+def test_docs_coverage_only_when_the_gate_measures_it(git_repo, tmp_path, gates, expected):
+    # Review I4: a passing docs-gates step without docs-coverage must not become "100% documented".
+    git_repo.commit("feat: a", {".github/ghtools.toml": f"[ci]\ngates = {gates}\n"})
+    out = tmp_path / "docs.json"
+    args = ["-C", str(git_repo.path), "status", "collect", "docs", "--result", "success"]
+    assert main([*args, "--coverage-gate", "success", "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["coverage"] == expected

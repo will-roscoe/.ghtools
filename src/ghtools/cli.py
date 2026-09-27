@@ -450,7 +450,9 @@ def _cmd_status_collect(args: Any) -> int:
         legs = [lg for lg in legs if "python" in lg]  # skip other artifacts' JSON (docs.json)
         fragment = fr.ci_fragment(legs, cfg.get("ci.gates"))
     elif args.source == "docs":
-        fragment = fr.docs_fragment(args.result, args.coverage_gate)
+        # Only the docs-coverage gate measures documentation; other docs gates passing says nothing.
+        measured = "docs-coverage" in cfg.get("ci.gates")
+        fragment = fr.docs_fragment(args.result, args.coverage_gate if measured else None)
     else:
         fragment = fr.project_fragment(cfg, root, args.version or None, args.open_issues)
     if fragment:

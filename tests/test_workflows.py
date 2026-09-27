@@ -192,10 +192,14 @@ def test_status_gets_a_version_only_when_one_was_released():
 def test_status_recording_never_fails_ci():
     # Review I9: a crash while recording status must not fail the test or docs job.
     for name, job in (("python-ci.yml", "test"), ("docs.yml", "build")):
-        steps = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())["jobs"][job]["steps"]
+        steps = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())["jobs"][job][
+            "steps"
+        ]
         record = [
-            s for s in steps
-            if "ghtools status" in s.get("run", "") or "ghtools-status" in str(s.get("with", {}).get("name", ""))
+            s
+            for s in steps
+            if "ghtools status" in s.get("run", "")
+            or "ghtools-status" in str(s.get("with", {}).get("name", ""))
         ]
         assert len(record) == 2, name
         assert all(s.get("continue-on-error") is True for s in record), name
