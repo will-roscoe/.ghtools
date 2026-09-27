@@ -20,6 +20,7 @@ from .config import CONFIG_PATH, dump_toml, from_dict
 from .detect import Detection, detect
 from .errors import PreconditionError
 from .gitutil import dirty_paths, git, is_work_tree_root, tag_exists
+from .status.publish import repo_slug
 from .templates import render
 
 STUB_VERSION = 1
@@ -80,6 +81,44 @@ def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str,
 
 def render_stub(branch: str, pypi: bool, ref: str = STUB_REF) -> str:
     return render("stub.yml.j2", branch=branch, pypi=pypi, ref=ref)
+
+
+BADGE_MAP = {
+    "coverage.svg": "coverage",
+    "pytest.svg": "tests",
+    "ruff.svg": "lint",
+    "pyversion.svg": "python",
+    "version.svg": "version",
+    "interrogate-badge.svg": "docstrings",
+}
+_STATUS_REF = re.compile(
+    r"https://raw\.githubusercontent\.com/[^/\s)\"']+/[^/\s)\"']+/[^/\s)\"']+/\.github/status/status\.svg"
+)
+_BADGE_REF = re.compile(r"(?:\./)?\.github/badges/([\w.-]+\.svg)")
+
+
+def rewrite_readme(text: str, slug: str, branch: str) -> tuple[str, list[str], list[str]]:
+    """Point README status/badge references at the status branch; leave unknown badges alone."""
+    from .status.publish import status_url
+
+    done: list[str] = []
+    left: list[str] = []
+
+    def status_sub(match: re.Match[str]) -> str:
+        done.append(match.group(0))
+        return status_url(slug, branch, "status.svg")
+
+    def badge_sub(match: re.Match[str]) -> str:
+        name = BADGE_MAP.get(match.group(1))
+        if not name:
+            left.append(f".github/badges/{match.group(1)}")
+            return match.group(0)
+        done.append(match.group(0))
+        return status_url(slug, branch, f"badges/{name}.svg")
+
+    text = _STATUS_REF.sub(status_sub, text)
+    text = _BADGE_REF.sub(badge_sub, text)
+    return text, done, sorted(set(left))
 
 
 @dataclass
@@ -145,12 +184,36 @@ def make_plan(
     gates = gates_from_replaced(replaced_texts, d.values.get("docs.prebuild", []))
     if gates and "ci.gate" not in d.values:
         d.set("ci.gate", gates, "make steps in the workflows ghtools replaces")
+    d.set("status.enabled", True, "ghtools publishes the status card to its own branch")
     cfg = from_dict(_nested(d.values))  # validates the proposal before anything is written
     plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
     pypi = "pypi" in cfg.get("release.publish")
     plan.write[STUB_PATH] = render_stub(cfg.get("branch"), pypi, ref)
     if not keep_old:
         plan.remove += [s for s in REPLACED_SCRIPTS if (root / s).is_file()]
+        status_dir = root / ".github/status"
+        if status_dir.is_dir():
+            plan.remove += [
+                p.relative_to(root).as_posix() for p in sorted(status_dir.rglob("*")) if p.is_file()
+            ]
+        plan.remove += [
+            f".github/badges/{n}"
+            for n in sorted(BADGE_MAP)
+            if (root / ".github/badges" / n).is_file()
+        ]
+    readme = root / "README.md"
+    slug = repo_slug(root)
+    if readme.is_file() and slug:
+        new_text, done, left = rewrite_readme(
+            readme.read_text(encoding="utf-8"), slug, cfg.get("status.branch")
+        )
+        if done:
+            plan.write["README.md"] = new_text
+        for ref_path in left:
+            plan.notes.append(
+                f"{ref_path}: not produced by ghtools, left as is; the workflow that updated it is "
+                "replaced, so update or remove that README reference"
+            )
     if pypi:
         plan.notes.append(
             "PyPI: change this project's trusted publisher to workflow `ghtools.yml`, "

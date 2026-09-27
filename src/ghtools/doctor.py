@@ -121,4 +121,35 @@ def run_checks(root: Path, gh: GhJson = gh_json) -> list[Finding]:
                 "environment `pypi` (not checkable from here)",
             )
         )
+
+    if cfg.get("status.enabled"):
+        out += _status_findings(cfg, name, gh)
+    return out
+
+
+def _status_findings(cfg: Config, name: str, gh: GhJson) -> list[Finding]:
+    branch = cfg.get("status.branch")
+    out: list[Finding] = []
+    if gh(["api", f"repos/{name}/branches/{branch}"]) is None:
+        out.append(
+            Finding(
+                "warn",
+                f"status: the {branch} branch doesn't exist yet "
+                "(the first default-branch run creates it)",
+            )
+        )
+    blocking = {"non_fast_forward", "creation", "update"}
+    for summary in gh(["api", f"repos/{name}/rulesets"]) or []:
+        rs = gh(["api", f"repos/{name}/rulesets/{summary['id']}"]) or {}
+        includes = set(rs.get("conditions", {}).get("ref_name", {}).get("include", []))
+        rules = {r.get("type") for r in rs.get("rules", [])}
+        targets_branch = {"~ALL", f"refs/heads/{branch}"} & includes
+        if rs.get("enforcement") == "active" and targets_branch and blocking & rules:
+            out.append(
+                Finding(
+                    "warn",
+                    f"ruleset '{rs.get('name')}' blocks force-pushes to {branch}; exclude "
+                    f"refs/heads/{branch} from it or status publishing will fail",
+                )
+            )
     return out
