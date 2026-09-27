@@ -691,6 +691,30 @@ def _directives_commands(sub: Any) -> None:
     r.set_defaults(handler=_cmd_directives_resolve)
 
 
+def _cmd_stub(args: Any) -> int:
+    from .ci import STUB_PATH
+    from .errors import PreconditionError
+    from .scaffold import _edited_after_commit, current_stub
+
+    root = repo_dir(args)
+    text = current_stub(root)
+    if not args.write:
+        print(text, end="")
+        return 0
+    if _edited_after_commit(root, [STUB_PATH]):
+        raise PreconditionError(f"{STUB_PATH} has uncommitted edits; commit or discard them first")
+    (root / STUB_PATH).write_text(text, encoding="utf-8")
+    print(f"wrote {STUB_PATH}")
+    return 0
+
+
+@registrar
+def _stub_command(sub: Any) -> None:
+    p = sub.add_parser("stub", help="the workflow stub for the current settings (keeps its pin)")
+    p.add_argument("--write", action="store_true", help="write it to .github/workflows/ghtools.yml")
+    p.set_defaults(handler=_cmd_stub)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."

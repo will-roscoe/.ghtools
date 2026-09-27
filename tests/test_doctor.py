@@ -123,3 +123,20 @@ def test_nested_repo_that_is_neither_submodule_nor_ignored(tmp_path):
     assert any(
         "stray is a nested git repo that is neither a submodule nor gitignored" in m for m in msgs
     )
+
+
+def test_dispatch_needs_actions_write_and_a_dispatchable_workflow(tmp_path):
+    _setup(tmp_path)
+    with (tmp_path / ".github/ghtools.toml").open("a") as f:
+        f.write(
+            '[directives]\nenabled = true\ndispatch = { "update-todo" = "update-todo.yml", "nightly" = "nightly.yml" }\n'
+        )
+    (tmp_path / ".github/workflows/nightly.yml").write_text(
+        "on:\n  schedule:\n    - cron: '0 0 * * *'\n"
+    )
+    findings = doctor.run_checks(tmp_path, FakeGh(GOOD))
+    fails = [f.message for f in findings if f.level == "fail"]
+    warns = [f.message for f in findings if f.level == "warn"]
+    assert any("stub has no dispatch job" in m for m in fails)
+    assert any("update-todo.yml does not exist" in m for m in fails)
+    assert any("nightly.yml has no workflow_dispatch trigger" in m for m in warns)

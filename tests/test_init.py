@@ -331,3 +331,27 @@ def test_stub_dispatch_job_only_when_configured():
     assert job["permissions"] == {"actions": "write"}
     assert job["uses"].endswith("/.github/workflows/dispatch.yml@v1")
     assert "actions" not in stub["permissions"]  # granted to that one job only
+
+
+def test_current_stub_keeps_the_pin_and_follows_settings(git_repo):
+    from ghtools.cli import main
+
+    stub = scaffold.render_stub("main", pypi=False, ref="main")
+    git_repo.commit(
+        "ci: ghtools",
+        {
+            ".github/ghtools.toml": '[directives]\nenabled = true\ndispatch = { "t" = "t.yml" }\n',
+            ".github/workflows/ghtools.yml": stub,
+        },
+    )
+    text = scaffold.current_stub(git_repo.path)
+    assert "pipeline.yml@main" in text and "dispatch.yml@main" in text
+    assert main(["-C", str(git_repo.path), "stub", "--write"]) == 0
+    assert (git_repo.path / ".github/workflows/ghtools.yml").read_text() == text
+    (git_repo.path / ".github/workflows/ghtools.yml").write_text("edited\n")
+    assert main(["-C", str(git_repo.path), "stub", "--write"]) == 3
+
+
+def test_directives_workflow_is_replaced():
+    wf = "jobs:\n  r:\n    steps:\n      - run: python .github/scripts/resolve_directives.py\n"
+    assert scaffold.classify_workflow(wf)[0] == "replace"

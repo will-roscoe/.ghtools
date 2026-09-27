@@ -113,6 +113,36 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+def _directive_findings(cfg: Config, root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    dispatch = cfg.get("directives.dispatch")
+    if dispatch:
+        stub_text = (
+            (root / STUB_PATH).read_text(encoding="utf-8") if (root / STUB_PATH).is_file() else ""
+        )
+        if "dispatch.yml@" not in stub_text:
+            findings.append(
+                Finding("fail", "directives: stub has no dispatch job; run `ghtools stub --write`")
+            )
+        for name, wf in dispatch.items():
+            path = root / ".github/workflows" / wf
+            if not path.is_file():
+                findings.append(
+                    Finding(
+                        "fail", f"directives.dispatch.{name}: .github/workflows/{wf} does not exist"
+                    )
+                )
+            elif "workflow_dispatch" not in path.read_text(encoding="utf-8"):
+                findings.append(
+                    Finding(
+                        "warn",
+                        f"directives.dispatch.{name}: {wf} has no workflow_dispatch trigger, "
+                        "so it can't be started",
+                    )
+                )
+    return findings
+
+
 def run_checks(root: Path, gh: GhJson = gh_json) -> list[Finding]:
     root = Path(root)
     try:
@@ -121,6 +151,7 @@ def run_checks(root: Path, gh: GhJson = gh_json) -> list[Finding]:
         return [Finding("fail", str(exc))]
     out = [Finding("ok", "settings: .github/ghtools.toml is valid"), *_stub_findings(root)]
     out += _subproject_findings(cfg, root)
+    out += _directive_findings(cfg, root)
 
     repo = gh(["repo", "view", "--json", "nameWithOwner,visibility"])
     if not repo:

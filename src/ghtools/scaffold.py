@@ -16,7 +16,7 @@ from typing import Any
 
 from . import archive
 from .ci import STUB_PATH
-from .config import CONFIG_PATH, dump_toml, from_dict
+from .config import CONFIG_PATH, dump_toml, from_dict, load
 from .detect import Detection, detect
 from .errors import PreconditionError
 from .gitutil import dirty_paths, git, is_work_tree_root, tag_exists
@@ -34,13 +34,15 @@ _REPLACED: list[tuple[str, str]] = [
     (r"\bpytest\b|ruff check|ruff-action|ruff format", "CI tests and lint"),
     (r"yamllint|shellcheck", "lint gates"),
     (r"\.github/badges/version\.svg", "version badge"),
+    (r"resolve_directives", "commit directives ([directives])"),
 ]
 # Workflows doing something ghtools doesn't, which must survive init.
-_KEEP = r"claude-code-action|@github/copilot|resolve_directives|workflow_run:|pull_request_target:"
+_KEEP = r"claude-code-action|@github/copilot|workflow_run:|pull_request_target:"
 REPLACED_SCRIPTS = [
     ".github/scripts/compute_next_version.py",
     ".github/scripts/finalize_changelog.py",
     ".github/scripts/sync_readme.py",
+    ".github/scripts/resolve_directives.py",
 ]
 
 _OLD_START = re.compile(r"<!-- SYNC:(\w+) START - generated from (\S+?), do not edit here -->")
@@ -145,6 +147,21 @@ def rewrite_readme(
     text = _STATUS_REF.sub(status_sub, text)
     text = _BADGE_REF.sub(badge_sub, text)
     return text, done, sorted(set(left)), sorted(names)
+
+
+def current_stub(root: Path) -> str:
+    root = Path(root)
+    cfg = load(root)
+    existing = (
+        (root / STUB_PATH).read_text(encoding="utf-8") if (root / STUB_PATH).is_file() else ""
+    )
+    pin = re.search(r"pipeline\.yml@(\S+)", existing)
+    return render_stub(
+        cfg.get("branch"),
+        "pypi" in cfg.get("release.publish"),
+        pin.group(1) if pin else STUB_REF,
+        dispatch=bool(cfg.get("directives.dispatch")),
+    )
 
 
 @dataclass
