@@ -294,6 +294,32 @@ def _docs_commands(sub: Any) -> None:
     ds.add_parser("html-dir").set_defaults(handler=_cmd_docs_html_dir)
 
 
+def _cmd_init(args: Any) -> int:
+    from .scaffold import init_repo
+
+    return init_repo(
+        Path(args.cwd),
+        yes=args.yes,
+        dry_run=args.dry_run,
+        keep_old=args.keep_old,
+        archive_mode=args.archive,
+        write=args.write,
+        ref=args.ref,
+    )
+
+
+@registrar
+def _init_command(sub: Any) -> None:
+    p = sub.add_parser("init", help="set up ghtools in the repository you're in")
+    p.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
+    p.add_argument("--yes", action="store_true", help="accept detected values and defaults")
+    p.add_argument("--keep-old", action="store_true", help="don't remove replaced workflows")
+    p.add_argument("--archive", choices=["snapshot", "none"], default="snapshot")
+    p.add_argument("--write", action="store_true", help="on re-run, overwrite ghtools.toml")
+    p.add_argument("--ref", default="v1", help="ref of .ghtools the stub pins (default v1)")
+    p.set_defaults(handler=_cmd_init)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
