@@ -716,6 +716,35 @@ def _stub_command(sub: Any) -> None:
     p.set_defaults(handler=_cmd_stub)
 
 
+def _cmd_sync(args: Any) -> int:
+    from . import sync
+
+    if bool(args.repos) == args.all:
+        raise GhtoolsError("name repositories (owner/name ...) or pass --all, not both")
+    owner = args.owner or (sync.real_gh(["api", "user"]) or {}).get("login", "")
+    repos = args.repos or sync.discover(owner, sync.real_gh)
+    failed = False
+    for repo in repos:
+        out = sync.sync_repo(
+            repo, gh=sync.real_gh, clone=sync.gh_clone, run_git=sync.run_git, dry_run=args.dry_run
+        )
+        print(f"{out.repo:40} {out.state:17} {out.detail}", flush=True)
+        failed |= out.state == "failed"
+    return 1 if failed else 0
+
+
+@registrar
+def _sync_command(sub: Any) -> None:
+    p = sub.add_parser("sync", help="open stub-update pull requests in other repositories")
+    p.add_argument("repos", nargs="*", metavar="OWNER/NAME")
+    p.add_argument(
+        "--all", action="store_true", help="every non-archived repo of --owner with a stub"
+    )
+    p.add_argument("--owner", default="", help="default: the gh-authenticated user")
+    p.add_argument("--dry-run", action="store_true", help="report, clone and push nothing")
+    p.set_defaults(handler=_cmd_sync)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
