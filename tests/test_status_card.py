@@ -204,3 +204,13 @@ def test_only_the_logo_skips_escaping(tmp_path):
         "project": {"name": "x", "description": "data: <1% & rising", "version": "", "links": {}}
     }
     ET.fromstring(model.render_card(data, _cfg(), tmp_path))
+
+
+def test_logo_outside_the_repo_is_never_inlined(tmp_path):
+    # Review M16: an absolute or ../ logo path could inline any runner file into a public SVG.
+    secret = tmp_path / "secret.txt"
+    secret.write_text("GH_TOKEN=x")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for logo in (str(secret), "../secret.txt"):
+        assert model.build_model(FULL, _cfg(logo=logo), repo)["logo"] == ""

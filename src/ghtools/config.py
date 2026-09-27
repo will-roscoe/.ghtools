@@ -272,6 +272,10 @@ def check_paths(cfg: Config, root: Path) -> None:
         raise ConfigError(f"release.zip: {zip_dir} is not a directory")
     if cfg.get("docs.enabled") and not (root / cfg.get("docs.dir") / "conf.py").is_file():
         raise ConfigError(f"docs.dir: {cfg.get('docs.dir')}/conf.py does not exist")
+    logo = cfg.get("status.logo")
+    inside = (root / logo).resolve().is_relative_to(root.resolve())
+    if logo and not (inside and (root / logo).is_file()):
+        raise ConfigError(f"status.logo: {logo} must be a file inside the repository")
 
 
 def from_dict(raw: dict[str, Any]) -> Config:

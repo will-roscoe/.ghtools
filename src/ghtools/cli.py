@@ -474,7 +474,11 @@ def _cmd_status_publish(args: Any) -> int:
     from .status.publish import publish
 
     root = repo_dir(args)
-    fragments = {Path(p).stem: json.loads(Path(p).read_text()) for p in args.files}
+    fragments: dict[str, Any] = {}
+    for path in args.files:
+        fragment = json.loads(Path(path).read_text())
+        # Named by its source (what status.extra lists), not by whatever the file is called.
+        fragments[fragment.get("source") or Path(path).stem] = fragment
     print(publish(root, fragments, _config.load(root)))
     return 0
 

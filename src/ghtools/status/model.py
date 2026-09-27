@@ -50,6 +50,14 @@ def wrap(text: str, width: int) -> list[str]:
     return lines
 
 
+def _inside(root: Path, rel: str) -> bool:
+    """Only files inside the repository may be inlined: the card is public."""
+    if not rel:
+        return False
+    base = Path(root).resolve()
+    return (base / rel).resolve().is_relative_to(base)
+
+
 def logo_data_uri(path: Path) -> str:
     """Inline the logo: GitHub serves raw SVGs under a CSP that blocks external images."""
     try:
@@ -186,7 +194,7 @@ def _panels(
 def build_model(data: dict[str, dict[str, Any]], cfg: Config, root: Path) -> dict[str, Any]:
     project = data.get("project", {})
     logo_path = cfg.get("status.logo")
-    logo = logo_data_uri(Path(root) / logo_path) if logo_path else ""
+    logo = logo_data_uri(Path(root) / logo_path) if _inside(root, logo_path) else ""
     text_x = 130 if logo else 35
     lines = wrap(project.get("description", ""), 60 if logo else 74)
     links_y = 90 + 18 * len(lines) + 12

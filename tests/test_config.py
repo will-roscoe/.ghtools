@@ -227,3 +227,10 @@ def test_status_branch_must_not_be_the_default_branch():
     # Review C1: publishing replaces the branch with one orphan commit.
     with pytest.raises(ConfigError, match=r"status\.branch: must not be the default branch"):
         config.from_dict({"branch": "master", "status": {"branch": "master"}})
+
+
+@pytest.mark.parametrize("logo", ["/etc/hostname", "../outside.svg"])
+def test_status_logo_must_be_inside_the_repo(tmp_path, logo):
+    cfg = config.from_dict({"status": {"logo": logo}})
+    with pytest.raises(ConfigError, match=r"status\.logo: .* must be a file inside the repository"):
+        config.check_paths(cfg, tmp_path)

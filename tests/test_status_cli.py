@@ -130,3 +130,32 @@ def test_docs_coverage_only_when_the_gate_measures_it(git_repo, tmp_path, gates,
     args = ["-C", str(git_repo.path), "status", "collect", "docs", "--result", "success"]
     assert main([*args, "--coverage-gate", "success", "--out", str(out)]) == 0
     assert json.loads(out.read_text())["coverage"] == expected
+
+
+def test_published_fragments_are_named_by_their_source(git_repo, tmp_path, capsys):
+    # Review M15: `--out pd.json` published the fragment as "pd", which status.extra never shows.
+    repo = _repo(git_repo, tmp_path)
+    args = ["-C", str(repo.path), "status"]
+    out = tmp_path / "pd.json"
+    assert (
+        main(
+            [*args, "set", "proton-drive", "--label", "PD", "--item", "Pinned=1", "--out", str(out)]
+        )
+        == 0
+    )
+    assert main([*args, "publish", str(out)]) == 0
+    listing = subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(tmp_path / "r.git"),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "ghtools-status",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "data/proton-drive.json" in listing and "data/pd.json" not in listing
