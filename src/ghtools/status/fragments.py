@@ -108,6 +108,7 @@ def leg(
     coverage: float | None,
     canonical: bool,
     docstrings: float | None,
+    subproject: str = "",
 ) -> dict[str, Any]:
     return {
         "python": python,
@@ -118,13 +119,32 @@ def leg(
         "coverage": coverage,
         "canonical": canonical,
         "docstrings": docstrings,
+        "subproject": subproject,
     }
 
 
-def ci_fragment(legs: list[dict[str, Any]], gates: list[str]) -> dict[str, Any]:
+def _sum_tests(results: list[dict[str, Any]]) -> dict[str, Any]:
+    keys = ("passed", "failed", "skipped", "total")
+    total = {k: sum(r.get(k, 0) for r in results) for k in keys}
+    total["duration_s"] = round(sum(r.get("duration_s", 0) for r in results), 2)
+    return total
+
+
+def ci_fragment(
+    legs: list[dict[str, Any]],
+    gates: list[str],
+    previous: dict[str, Any] | None = None,
+    in_tree: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """The CI summary. Subproject results carry over from `previous` for subprojects this run
+    didn't select, so the card shows each one's latest result instead of flapping."""
     if not legs:
         return {}
-    canonical = next((lg for lg in legs if lg.get("canonical")), legs[0])
+    # Root legs only: in an umbrella the first matrix leg is some subproject.
+    root_legs = [lg for lg in legs if not lg.get("subproject")]
+    canonical = next((lg for lg in root_legs if lg.get("canonical")), None) or (
+        root_legs[0] if root_legs else None
+    )
     python: dict[str, str] = {}
     builds: dict[str, dict[str, str]] = {}
     for lg in legs:
@@ -135,17 +155,43 @@ def ci_fragment(legs: list[dict[str, Any]], gates: list[str]) -> dict[str, Any]:
         if slot.get(arch) != "failing":
             slot[arch] = lg["status"]
     ordered = sorted(python, key=_version_key)
-    return {
+    now = {
+        lg["subproject"]: {"status": lg["status"], "tests": lg["tests"]}
+        for lg in legs
+        if lg.get("subproject")
+    }
+    carried = {
+        name: result
+        for name, result in ((previous or {}).get("subproject_legs") or {}).items()
+        if name in in_tree
+    }
+    merged = {**carried, **now}
+    if canonical:
+        tests = canonical["tests"]
+        coverage, docstrings = canonical.get("coverage"), canonical.get("docstrings")
+        lint = canonical.get("gates") or "unknown"
+    else:  # umbrella: every subproject's latest results; coverage lives in Codecov's flags
+        tests = _sum_tests([r["tests"] for r in merged.values()])
+        coverage = docstrings = None
+        lint = "unknown"
+    fragment = {
         "source": "ci",
         "updated": _now(),
         "run": run_meta(),
-        "tests": canonical["tests"],
-        "coverage": canonical.get("coverage"),
-        "docstrings": canonical.get("docstrings"),
-        "lint": {"status": canonical.get("gates") or "unknown", "gates": gates},
+        "tests": tests,
+        "coverage": coverage,
+        "docstrings": docstrings,
+        "lint": {"status": lint, "gates": gates},
         "python": [{"version": v, "status": python[v]} for v in ordered],
         "builds": builds,
     }
+    if merged or in_tree:
+        names = list(in_tree) or sorted(merged)
+        fragment["subproject_legs"] = merged
+        fragment["subprojects"] = [
+            {"name": n, "status": merged[n]["status"] if n in merged else "not run"} for n in names
+        ]
+    return fragment
 
 
 def docs_fragment(result: str, coverage_gate: str | None) -> dict[str, Any]:

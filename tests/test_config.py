@@ -234,3 +234,72 @@ def test_status_logo_must_be_inside_the_repo(tmp_path, logo):
     cfg = config.from_dict({"status": {"logo": logo}})
     with pytest.raises(ConfigError, match=r"status\.logo: .* must be a file inside the repository"):
         config.check_paths(cfg, tmp_path)
+
+
+def test_subprojects_parse_and_validate(tmp_path):
+    cfg = config.from_dict(
+        {
+            "ci": {"coverage": {"flags": "subproject"}},
+            "subprojects": [
+                {
+                    "name": "scrapetool",
+                    "path": "scrapetool",
+                    "package": "scrapetool",
+                    "tests": "scrapetool/tests",
+                    "install": ["-e ./scrapetool[test]"],
+                },
+                {
+                    "name": "videoapp_ng",
+                    "path": "videoapp_ng",
+                    "package": "videoapp_ng",
+                    "needs": ["scrapetool"],
+                },
+                {"name": "coordpy", "path": "coordpy", "kind": "submodule"},
+            ],
+        }
+    )
+    assert [s["name"] for s in config.in_tree(cfg)] == ["scrapetool", "videoapp_ng"]
+    assert cfg.get("subprojects")[1]["kind"] == "in-tree"
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        (
+            [{"name": "a", "path": "a", "needs": ["b"]}],
+            r"subprojects\[0\]\.needs: unknown subproject 'b'",
+        ),
+        (
+            [{"name": "a", "path": "a"}, {"name": "a", "path": "b"}],
+            r"subprojects\[1\]\.name: duplicate subproject 'a'",
+        ),
+        (
+            [
+                {"name": "a", "path": "a", "needs": ["b"]},
+                {"name": "b", "path": "b", "needs": ["a"]},
+            ],
+            r"subprojects: dependency cycle a -> b -> a",
+        ),
+        ([{"name": "Bad", "path": "a"}], r"subprojects\[0\]\.name: 'Bad' must match"),
+    ],
+)
+def test_subproject_errors(rows, message):
+    with pytest.raises(ConfigError, match=message):
+        config.from_dict({"subprojects": rows})
+
+
+def test_check_paths_covers_subprojects(tmp_path):
+    cfg = config.from_dict({"subprojects": [{"name": "a", "path": "a"}]})
+    with pytest.raises(ConfigError, match=r"subprojects\[0\]\.path: a does not exist"):
+        config.check_paths(cfg, tmp_path)
+
+
+def test_subproject_paths_are_normalised_and_confined():
+    cfg = config.from_dict({"subprojects": [{"name": "c", "path": "./c/"}]})
+    assert cfg.get("subprojects")[0]["path"] == "c"
+    for bad in ("/abs", "../up", "a/../../b"):
+        with pytest.raises(
+            ConfigError,
+            match=r"subprojects\[0\]\.path: .* must be a relative path inside the repository",
+        ):
+            config.from_dict({"subprojects": [{"name": "c", "path": bad}]})

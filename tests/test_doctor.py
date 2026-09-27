@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 from ghtools import doctor, scaffold
 
 TOML = """\
@@ -99,3 +101,25 @@ def test_status_branch_missing_and_force_push_ruleset(tmp_path):
     msgs = [f.message for f in doctor.run_checks(tmp_path, FakeGh(gh)) if f.level == "warn"]
     assert any("ghtools-status branch doesn't exist yet" in m for m in msgs)
     assert any("ruleset 'All branches' blocks force-pushes to ghtools-status" in m for m in msgs)
+
+
+def test_codecov_flags_missing_a_subproject(tmp_path):
+    _setup(tmp_path)
+    toml = TOML.replace("codecov = true\n", 'codecov = true\nflags = "subproject"\n')
+    (tmp_path / ".github/ghtools.toml").write_text(
+        toml + '[[subprojects]]\nname = "a"\npath = "a"\n'
+    )
+    (tmp_path / "a").mkdir()
+    (tmp_path / "codecov.yml").write_text("flag_management:\n  individual_flags:\n    - name: b\n")
+    msgs = [f.message for f in doctor.run_checks(tmp_path, FakeGh(GOOD)) if f.level == "warn"]
+    assert any("codecov.yml has no individual_flags entry for: a" in m for m in msgs)
+
+
+def test_nested_repo_that_is_neither_submodule_nor_ignored(tmp_path):
+    _setup(tmp_path)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "stray/.git").mkdir(parents=True)
+    msgs = [f.message for f in doctor.run_checks(tmp_path, FakeGh(GOOD)) if f.level == "warn"]
+    assert any(
+        "stray is a nested git repo that is neither a submodule nor gitignored" in m for m in msgs
+    )

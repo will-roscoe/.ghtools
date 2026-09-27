@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .gitutil import current_branch, default_branch, release_tags, tracked_files
+from .gitutil import current_branch, default_branch, release_tags, submodules, tracked_files
 
 
 @dataclass
@@ -65,11 +65,19 @@ def _branch(root: Path, d: Detection) -> None:
         d.set("branch", current_branch(root) or "main", "current branch (no origin/HEAD)")
 
 
+def _has_project_table(pyproject: str) -> bool:
+    """Parsed, not substring-matched: a comment saying "no [project]" is not a package."""
+    try:
+        return "project" in tomllib.loads(pyproject)
+    except tomllib.TOMLDecodeError:
+        return False
+
+
 def _profile(root: Path, pyproject: str, d: Detection) -> list[Path]:
     manifests = sorted(root.glob("custom_components/*/manifest.json"))
     if manifests and (root / "hacs.json").is_file():
         d.set("profile", "hacs", "custom_components/*/manifest.json + hacs.json")
-    elif (pyproject and "[project]" in pyproject) or (root / "setup.py").is_file():
+    elif _has_project_table(pyproject) or (root / "setup.py").is_file():
         d.set("profile", "python", "pyproject.toml [project]" if pyproject else "setup.py")
     elif (root / ".gitmodules").is_file():
         d.set("profile", "umbrella", ".gitmodules with no root package")
@@ -232,6 +240,55 @@ def _readme(root: Path, d: Detection) -> None:
             d.set("ci.gates", [*gates, "readme-sync"], "README sync markers")
 
 
+def _subprojects(root: Path, d: Detection) -> None:
+    rows: list[dict[str, Any]] = []
+    modules = submodules(root)
+    module_paths = {path for path, _ in modules}
+    for sub in sorted(root.iterdir()):
+        pyproject = sub / "pyproject.toml"
+        if not sub.is_dir() or sub.name.startswith(".") or not pyproject.is_file():
+            continue
+        if sub.name in module_paths:  # a checked-out submodule: listed below, not built here
+            continue
+        try:
+            project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
+        except tomllib.TOMLDecodeError:
+            continue
+        name = project.get("name")
+        if not name:
+            continue
+        extras = project.get("optional-dependencies", {})
+        pkgs = (
+            [
+                p.name
+                for p in (sub / "src").iterdir()
+                if p.is_dir() and (p / "__init__.py").is_file()
+            ]
+            if (sub / "src").is_dir()
+            else []
+        )
+        row: dict[str, Any] = {
+            "name": name.lower().replace("-", "_"),
+            "path": sub.name,
+            "package": pkgs[0] if len(pkgs) == 1 else name.lower().replace("-", "_"),
+        }
+        if (sub / "tests").is_dir():
+            row["tests"] = f"{sub.name}/tests"
+        extra = next((e for e in ("test", "tests", "dev") if e in extras), None)
+        if extra:  # the leg needs the project's test dependencies, not just the package
+            row["install"] = [f"-e ./{sub.name}[{extra}]"]
+        rows.append(row)
+    for path, _url in modules:
+        rows.append(
+            {"name": Path(path).name.lower().replace("-", "_"), "path": path, "kind": "submodule"}
+        )
+    if rows:
+        d.set("subprojects", rows, "nested pyproject.toml projects and .gitmodules")
+    if any(r.get("kind") != "submodule" for r in rows):
+        d.set("ci.coverage.flags", "subproject", "one Codecov flag per in-tree subproject")
+        d.set("status.rows", ["python", "builds", "subprojects"], "in-tree subprojects")
+
+
 def detect(root: Path) -> Detection:
     root = Path(root)
     d = Detection()
@@ -245,4 +302,5 @@ def detect(root: Path) -> Detection:
     _ci(root, pyproject, wfs, wf, d)
     _docs(root, wfs, wf, d)
     _readme(root, d)
+    _subprojects(root, d)
     return d

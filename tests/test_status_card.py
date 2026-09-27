@@ -214,3 +214,29 @@ def test_logo_outside_the_repo_is_never_inlined(tmp_path):
     repo.mkdir()
     for logo in (str(secret), "../secret.txt"):
         assert model.build_model(FULL, _cfg(logo=logo), repo)["logo"] == ""
+
+
+def test_subprojects_panel(tmp_path):
+    data = {
+        "project": {"name": "python-dev", "description": "", "version": "", "links": {}},
+        "ci": {
+            "subprojects": [
+                {"name": "scrapetool", "status": "passing"},
+                {"name": "videoapp_ng", "status": "failing"},
+            ]
+        },
+    }
+    cfg = config.from_dict({"status": {"rows": ["subprojects"]}})
+    m = model.build_model(data, cfg, tmp_path)
+    assert [p["kind"] for p in m["panels"]] == ["subprojects"]
+    svg = model.render_card(data, cfg, tmp_path)
+    assert "videoapp_ng" in svg
+
+
+def test_not_run_subprojects_are_muted_not_red(tmp_path):
+    data = {
+        "project": {"name": "p", "description": "", "version": "", "links": {}},
+        "ci": {"subprojects": [{"name": "c", "status": "not run"}]},
+    }
+    svg = model.render_card(data, config.from_dict({"status": {"rows": ["subprojects"]}}), tmp_path)
+    assert 'class="muted"' in svg and 'class="fail"' not in svg

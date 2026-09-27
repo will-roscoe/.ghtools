@@ -64,7 +64,7 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "package": Field(str, ""),
         "floor": Field(int, 0),
         "codecov": Field(bool, False),
-        "flags": Field(str, "python-version", _c("python-version", "none")),
+        "flags": Field(str, "python-version", _c("python-version", "subproject", "none")),
     },
     "docs": {
         "enabled": Field(bool, False),
@@ -111,6 +111,16 @@ TABLE_ARRAYS: dict[str, dict[str, Field]] = {
         "source": Field(str, ""),
         "heading-offset": Field(int, 0),
     },
+    "subprojects": {
+        "name": Field(str, None),
+        "path": Field(str, None),
+        "kind": Field(str, "in-tree", _c("in-tree", "submodule")),
+        "package": Field(str, ""),
+        "tests": Field(str, ""),
+        "install": Field(list, []),
+        "needs": Field(list, []),
+        "setup": Field(list, []),
+    },
 }
 
 
@@ -125,6 +135,9 @@ def register_table_array(name: str, fields: dict[str, Field]) -> None:
 def extend_choices(section: str, key: str, *values: Any) -> None:
     field = SCHEMA[section][key]
     field.choices = frozenset((field.choices or frozenset()) | set(values))
+
+
+extend_choices("status", "rows", "subprojects")  # piece D: one dot per in-tree subproject
 
 
 class Config:
@@ -271,11 +284,52 @@ def _cross_checks(cfg: Config) -> None:
             raise ConfigError(f"readme.block[{i}].heading-offset: must be between -1 and 2")
         if block["kind"] == "sync" and not block["source"]:
             raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
+    _check_subprojects(cfg)
     for name in cfg.get("status.extra"):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
             raise ConfigError(
                 f"status.extra: {name!r} is not a valid fragment name (a-z, 0-9, - or _)"
             )
+
+
+def in_tree(cfg: Config) -> list[dict[str, Any]]:
+    return [s for s in cfg.get("subprojects") if s["kind"] == "in-tree"]
+
+
+def _check_subprojects(cfg: Config) -> None:
+    rows = cfg.get("subprojects")
+    names: list[str] = []
+    for i, row in enumerate(rows):
+        path = row["path"].strip().removeprefix("./").rstrip("/")
+        parts = path.split("/")
+        if not path or path.startswith("/") or ".." in parts:
+            raise ConfigError(
+                f"subprojects[{i}].path: {row['path']!r} must be a relative path "
+                "inside the repository"
+            )
+        row["path"] = path  # "./c/" and "c" must select the same files
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", row["name"]):
+            raise ConfigError(
+                f"subprojects[{i}].name: {row['name']!r} must match [a-z0-9][a-z0-9_-]*"
+            )
+        if row["name"] in names:
+            raise ConfigError(f"subprojects[{i}].name: duplicate subproject {row['name']!r}")
+        names.append(row["name"])
+    for i, row in enumerate(rows):
+        for need in row["needs"]:
+            if need not in names:
+                raise ConfigError(f"subprojects[{i}].needs: unknown subproject {need!r}")
+    graph = {row["name"]: row["needs"] for row in rows}
+
+    def visit(node: str, trail: list[str]) -> None:
+        if node in trail:
+            cycle = " -> ".join([*trail[trail.index(node) :], node])
+            raise ConfigError(f"subprojects: dependency cycle {cycle}")
+        for nxt in graph[node]:
+            visit(nxt, [*trail, node])
+
+    for name in names:
+        visit(name, [])
 
 
 def check_paths(cfg: Config, root: Path) -> None:
@@ -296,6 +350,10 @@ def check_paths(cfg: Config, root: Path) -> None:
     inside = (root / logo).resolve().is_relative_to(root.resolve())
     if logo and not (inside and (root / logo).is_file()):
         raise ConfigError(f"status.logo: {logo} must be a file inside the repository")
+    for i, row in enumerate(cfg.get("subprojects")):
+        # Submodules are skipped: CI checks out without them, and they build in their own repos.
+        if row["kind"] == "in-tree" and not (root / row["path"]).is_dir():
+            raise ConfigError(f"subprojects[{i}].path: {row['path']} does not exist")
 
 
 def from_dict(raw: dict[str, Any]) -> Config:
@@ -338,6 +396,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "docker": cfg.get("ci.docker"),
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
         "status": {"enabled": cfg.get("status.enabled")},
+        "subprojects": bool(in_tree(cfg)),
         "release": {
             "enabled": cfg.get("release.enabled"),
             "commit": cfg.get("release.commit"),

@@ -159,3 +159,45 @@ def test_published_fragments_are_named_by_their_source(git_repo, tmp_path, capsy
         check=True,
     ).stdout
     assert "data/proton-drive.json" in listing and "data/pd.json" not in listing
+
+
+def test_collect_ci_carries_unselected_subprojects_from_the_status_branch(git_repo, tmp_path):
+    toml = (
+        TOML + '[[subprojects]]\nname = "a"\npath = "a"\n[[subprojects]]\nname = "b"\npath = "b"\n'
+    )
+    git_repo.commit(
+        "feat: a", {".github/ghtools.toml": toml, "pyproject.toml": '[project]\nname = "x"\n'}
+    )
+    bare = tmp_path / "r.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    git_repo.run("remote", "add", "origin", str(bare))
+    git_repo.run("push", "-q", "origin", "main")
+    args = ["-C", str(git_repo.path), "status"]
+
+    def leg(name, outcome, out):
+        return main(
+            [
+                *args,
+                "leg",
+                "--python",
+                "3.12",
+                "--runner",
+                "ubuntu-latest",
+                "--outcome",
+                outcome,
+                "--subproject",
+                name,
+                "--out",
+                str(out),
+            ]
+        )
+
+    first, second = tmp_path / "l1", tmp_path / "l2"
+    leg("a", "success", first / "a.json")
+    leg("b", "failure", first / "b.json")
+    main([*args, "collect", "ci", "--legs", str(first), "--out", str(tmp_path / "ci1.json")])
+    main([*args, "publish", str(tmp_path / "ci1.json")])
+    leg("a", "success", second / "a.json")
+    main([*args, "collect", "ci", "--legs", str(second), "--out", str(tmp_path / "ci2.json")])
+    subs = json.loads((tmp_path / "ci2.json").read_text())["subprojects"]
+    assert subs == [{"name": "a", "status": "passing"}, {"name": "b", "status": "failing"}]

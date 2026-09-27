@@ -168,6 +168,16 @@ def _panels(
                     "width": 70 + 60 * len(oses),
                 }
             )
+        elif kind == "subprojects" and ci.get("subprojects"):
+            subs = ci["subprojects"]
+            wanted.append(
+                {
+                    "kind": "subprojects",
+                    "label": "SUBPROJECTS",
+                    "items": subs,
+                    "width": max(150, 70 * len(subs) + 20),
+                }
+            )
         elif kind == "extra":
             for name in cfg.get("status.extra"):
                 frag = data.get(name)
