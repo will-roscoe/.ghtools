@@ -658,6 +658,39 @@ def _subprojects_commands(sub: Any) -> None:
     st.set_defaults(handler=_cmd_subprojects_status)
 
 
+def _cmd_directives_resolve(args: Any) -> int:
+    from . import directives
+
+    root = repo_dir(args)
+    cfg = _config.load(root)
+    effects = []
+    if cfg.get("directives.enabled"):
+        effects = directives.resolve(
+            directives.messages(root, args.before),
+            cfg.get("directives.dispatch"),
+            cfg.get("docs.enabled"),
+        )
+    annotate = os.environ.get("GITHUB_ACTIONS") == "true"
+    for e in effects:
+        prefix = {"warn": "::warning::", "notice": "::notice::"}.get(e.kind, "") if annotate else ""
+        print(f"{prefix}{e.message or f'{e.directive}: {e.kind} {e.target}'.strip()}")
+    force = any(e.kind == "force-ci" for e in effects)
+    dispatch = sorted({e.target for e in effects if e.kind == "dispatch"})
+    if args.github_output:
+        write_github_output({"force-ci": str(force).lower(), "dispatch": json.dumps(dispatch)})
+    return 0
+
+
+@registrar
+def _directives_commands(sub: Any) -> None:
+    p = sub.add_parser("directives", help="CI directives in pushed commit messages")
+    ds = p.add_subparsers(dest="directives_cmd", required=True, metavar="<subcommand>")
+    r = ds.add_parser("resolve", help="resolve the directives in commits since --before")
+    r.add_argument("--before", default="", help="the push's previous head (github.event.before)")
+    r.add_argument("--github-output", action="store_true")
+    r.set_defaults(handler=_cmd_directives_resolve)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."

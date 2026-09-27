@@ -8,7 +8,9 @@ or explain why nothing happens. Release directives (`+:major` …) live in versi
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 BUILTIN = ("ci", "test", "lint", "coverage", "coverage-code", "coverage-docs", "docs")
 _LANGS = {"py"}
@@ -81,3 +83,22 @@ def resolve(messages: list[str], dispatch: dict[str, str], docs_enabled: bool) -
                     seen.add(effect.directive)
                     effects.append(effect)
     return effects
+
+
+def messages(root: Path, before: str) -> list[str]:
+    """Messages pushed since `before`, newest first; only HEAD when `before` is unusable."""
+    rng = ["-1", "HEAD"]
+    if before and set(before) != {"0"}:
+        known = subprocess.run(
+            ["git", "cat-file", "-e", f"{before}^{{commit}}"], cwd=root, capture_output=True
+        )
+        if known.returncode == 0:
+            rng = [f"{before}..HEAD"]
+    proc = subprocess.run(
+        ["git", "log", "--format=%B%x00", *rng],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [m.strip() for m in proc.stdout.split("\0") if m.strip()]
