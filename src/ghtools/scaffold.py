@@ -25,6 +25,8 @@ from .templates import render
 
 STUB_VERSION = 1
 STUB_REF = "v1"
+# One line per stub contract version, used in `ghtools sync` pull requests.
+STUB_CHANGES = {1: "first version of the ghtools workflow stub"}
 
 # What ghtools now does for a workflow that contains one of these (checked in order).
 _REPLACED: list[tuple[str, str]] = [
@@ -93,7 +95,14 @@ def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str,
 
 
 def render_stub(branch: str, pypi: bool, ref: str = STUB_REF, dispatch: bool = False) -> str:
-    return render("stub.yml.j2", branch=branch, pypi=pypi, ref=ref, dispatch=dispatch)
+    return render(
+        "stub.yml.j2",
+        branch=branch,
+        pypi=pypi,
+        ref=ref,
+        dispatch=dispatch,
+        stub_version=STUB_VERSION,  # read at call time, so the marker always follows the constant
+    )
 
 
 BADGE_MAP = {
