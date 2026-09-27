@@ -373,6 +373,7 @@ def _cmd_init(args: Any) -> int:
         archive_mode=args.archive,
         write=args.write,
         ref=args.ref,
+        community=args.community,
     )
 
 
@@ -385,6 +386,11 @@ def _init_command(sub: Any) -> None:
     p.add_argument("--archive", choices=["snapshot", "none"], default="snapshot")
     p.add_argument("--write", action="store_true", help="on re-run, overwrite ghtools.toml")
     p.add_argument("--ref", default="v1", help="ref of .ghtools the stub pins (default v1)")
+    p.add_argument(
+        "--community",
+        action="store_true",
+        help="also add issue forms, a PR template, CONTRIBUTING and SECURITY where missing",
+    )
     p.set_defaults(handler=_cmd_init)
 
 

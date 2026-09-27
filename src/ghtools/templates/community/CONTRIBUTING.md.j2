@@ -1,0 +1,23 @@
+# Contributing to [[ name ]]
+
+## Development setup
+
+```sh
+pip install -e .[dev]
+pytest
+```
+
+## Commit messages
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): description`,
+with types such as `feat`, `fix`, `docs`, `refactor` and `test`. Releases are automatic: a `feat`
+releases a minor version, a `fix` a patch, and a breaking change (`type!:` or a `BREAKING CHANGE:`
+footer) a major one.
+
+To force a particular release, put a directive alone on a line in the commit body:
+`+:major`, `+:minor`, `+:patch`, or `+:rc` / `+:pre` / `+:prepre` for a pre-release.
+
+## Pull requests
+
+Keep each pull request to one change, with a Conventional Commit title and passing checks. Describe
+what changed and why in the pull request itself.
