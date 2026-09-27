@@ -6,6 +6,22 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-27
+
+### Features
+
+- **sync**: re-render a repo's stub from its own settings, keeping its pin
+- **sync**: open stub-update pull requests across repositories
+- **init**: --community adds issue forms, PR template, CONTRIBUTING and SECURITY
+
+### Bug fixes
+
+- **sync**: re-runnable after a leftover branch, API errors and failed clones fail one repo; community files fit the repo
+
+### Documentation
+
+- **readme**: document sync and --community
+
 ## [0.5.0] - 2026-09-27
 
 ### Features
