@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +76,25 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "pages": Field(bool, False),
         "apt": Field(list, []),
         "prebuild": Field(list, []),  # commands run before sphinx-build (e.g. generated sources)
+    },
+    "status": {
+        "enabled": Field(bool, False),
+        "branch": Field(str, "ghtools-status"),
+        "card": Field(
+            list,
+            ["tests", "coverage", "lint", "docs"],
+            _c("tests", "coverage", "lint", "docs", "docstrings", "release", "open-issues"),
+        ),
+        "rows": Field(list, ["python", "builds"], _c("python", "builds", "extra")),
+        "links": Field(list, ["pypi", "docs", "repo"], _c("pypi", "docs", "repo")),
+        "logo": Field(str, ""),
+        "extra": Field(list, []),
+        "badges": Field(
+            list,
+            ["version", "coverage", "tests", "lint", "python"],
+            _c("version", "coverage", "tests", "lint", "python", "docs", "docstrings"),
+        ),
+        "description": Field(str, ""),
     },
 }
 
@@ -227,6 +247,11 @@ def _cross_checks(cfg: Config) -> None:
     is_pytest = words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]
     if cfg.get("ci.coverage.package") and not is_pytest:
         raise ConfigError("ci.coverage.package needs ci.test to run pytest")
+    for name in cfg.get("status.extra"):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
+            raise ConfigError(
+                f"status.extra: {name!r} is not a valid fragment name (a-z, 0-9, - or _)"
+            )
 
 
 def check_paths(cfg: Config, root: Path) -> None:
@@ -284,6 +309,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "flags": cfg.get("ci.coverage.flags"),
         "docker": cfg.get("ci.docker"),
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
+        "status": {"enabled": cfg.get("status.enabled")},
         "release": {
             "enabled": cfg.get("release.enabled"),
             "commit": cfg.get("release.commit"),
