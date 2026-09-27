@@ -101,3 +101,20 @@ def test_release_workflow_contract():
     text = (ROOT / ".github/workflows/release.yml").read_text()
     assert "[skip ci]" in text
     assert "git pull --rebase" in text
+
+
+def test_pipeline_contract_matches_the_stub():
+    from ghtools.scaffold import render_stub
+
+    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    call = doc[True]["workflow_call"]
+    assert set(call["outputs"]) == {"released", "tag", "version", "dist-artifact"}
+    assert set(call["inputs"]) == {"dry-run"}
+    assert set(call["secrets"]) == {"CODECOV_TOKEN"}
+    stub = yaml.safe_load(render_stub("main", pypi=True))
+    assert set(stub["jobs"]["pipeline"]["with"]) <= set(call["inputs"])
+    assert set(stub["jobs"]["pipeline"]["secrets"]) <= set(call["secrets"])
+    jobs = doc["jobs"]
+    assert {"config", "ci-python", "ci-hacs", "ci-lint", "docs", "release"} <= set(jobs)
+    for name in ("ci-python", "ci-hacs", "ci-lint", "docs", "release"):
+        assert jobs[name]["uses"].startswith("$/.github/workflows/"), name

@@ -1,0 +1,130 @@
+name: ghtools pipeline
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        description: Compute the release without writing anything
+        type: boolean
+        default: false
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+    outputs:
+      released:
+        value: ${{ jobs.release.outputs.released }}
+      tag:
+        value: ${{ jobs.release.outputs.tag }}
+      version:
+        value: ${{ jobs.release.outputs.version }}
+      dist-artifact:
+        value: ${{ jobs.release.outputs.dist-artifact }}
+
+permissions: {}
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      config: ${{ steps.export.outputs.config }}
+      default-ref: ${{ steps.ref.outputs.default-ref }}
+      would-release: ${{ steps.decide.outputs.released || 'false' }}
+      run-ci: ${{ steps.paths.outputs.run-ci }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-ghtools
+      - name: Validate and export settings
+        id: export
+        run: |
+          ghtools config check
+          echo "config=$(ghtools config export --json)" >> "$GITHUB_OUTPUT"
+      - name: Default branch?
+        id: ref
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          branch="$(ghtools config get branch)"
+          if [ "$EVENT" != "pull_request" ] && [ "$GITHUB_REF" = "refs/heads/$branch" ]; then
+            echo "default-ref=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "default-ref=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Would this release?
+        id: decide
+        if: steps.ref.outputs.default-ref == 'true'
+        run: ghtools release decide --github-output
+      - name: Should CI run?
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          WOULD_RELEASE: ${{ steps.decide.outputs.released }}
+        run: |
+          if [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ]; then
+            echo "run-ci=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run-ci=$(ghtools ci should-run --base "$BEFORE")" >> "$GITHUB_OUTPUT"
+          fi
+
+  ci-python:
+    needs: config
+    if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'python'
+    permissions:
+      contents: read
+    uses: $/.github/workflows/python-ci.yml
+    with:
+      matrix: ${{ toJSON(fromJSON(needs.config.outputs.config).matrix) }}
+      codecov: ${{ fromJSON(needs.config.outputs.config).codecov }}
+      flags: ${{ fromJSON(needs.config.outputs.config).flags }}
+      docker: ${{ fromJSON(needs.config.outputs.config).docker }}
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  ci-hacs:
+    needs: config
+    if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'hacs'
+    permissions:
+      contents: read
+    uses: $/.github/workflows/hacs-ci.yml
+
+  ci-lint:
+    needs: config
+    if: >-
+      needs.config.outputs.run-ci == 'true' &&
+      contains(fromJSON('["lint", "umbrella"]'), fromJSON(needs.config.outputs.config).profile)
+    permissions:
+      contents: read
+    uses: $/.github/workflows/lint-ci.yml
+
+  docs:
+    needs: [config, ci-python, ci-hacs, ci-lint]
+    if: >-
+      always() && needs.config.result == 'success' &&
+      fromJSON(needs.config.outputs.config).docs.enabled &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: $/.github/workflows/docs.yml
+    with:
+      deploy: >-
+        ${{ needs.config.outputs.default-ref == 'true' &&
+        fromJSON(needs.config.outputs.config).docs.pages && !inputs.dry-run }}
+
+  release:
+    needs: [config, ci-python, ci-hacs, ci-lint]
+    if: >-
+      always() && needs.config.result == 'success' &&
+      needs.config.outputs.default-ref == 'true' &&
+      needs.config.outputs.would-release == 'true' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    permissions:
+      contents: write
+    uses: $/.github/workflows/release.yml
+    with:
+      dry-run: ${{ inputs.dry-run }}
