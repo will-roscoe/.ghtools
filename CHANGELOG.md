@@ -6,6 +6,26 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-27
+
+### Features
+
+- **directives**: parse CI directives from commit messages into pipeline effects
+- **directives**: resolve pushed commits' directives into workflow outputs
+- **directives**: detect sph-dev's directives workflow, ghtools stub, doctor checks
+
+### Bug fixes
+
+- **directives**: strict dispatch names, [ci] forces every subproject, and tests of removed scripts are named
+
+### Documentation
+
+- **readme**: document commit directives and ghtools stub
+
+### CI
+
+- **directives**: force CI from commit directives; dispatch.yml starts configured workflows
+
 ## [0.4.0] - 2026-09-27
 
 ### Features
