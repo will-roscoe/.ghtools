@@ -82,3 +82,20 @@ def test_gh_unavailable_is_a_single_warning(tmp_path):
     assert findings[-1] == doctor.Finding(
         "warn", "gh unavailable or not logged in: GitHub-side checks skipped"
     )
+
+
+def test_status_branch_missing_and_force_push_ruleset(tmp_path):
+    _setup(tmp_path)
+    (tmp_path / ".github/ghtools.toml").write_text(TOML + "[status]\nenabled = true\n")
+    gh = dict(GOOD)
+    gh["api repos/o/r/branches/ghtools-status"] = None
+    gh["api repos/o/r/rulesets"] = [{"id": 9}]
+    gh["api repos/o/r/rulesets/9"] = {
+        "name": "All branches",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~ALL"]}},
+        "rules": [{"type": "non_fast_forward"}],
+    }
+    msgs = [f.message for f in doctor.run_checks(tmp_path, FakeGh(gh)) if f.level == "warn"]
+    assert any("ghtools-status branch doesn't exist yet" in m for m in msgs)
+    assert any("ruleset 'All branches' blocks force-pushes to ghtools-status" in m for m in msgs)

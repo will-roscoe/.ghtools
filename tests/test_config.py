@@ -199,3 +199,38 @@ def test_config_check_cli_checks_paths(tmp_path, capsys):
     (tmp_path / ".github/ghtools.toml").write_text('[version]\nsource = "pyproject"\n')
     assert main(["-C", str(tmp_path), "config", "check"]) == 1
     assert "pyproject.toml does not exist" in capsys.readouterr().err
+
+
+def test_status_section_defaults_and_validation():
+    cfg = config.from_dict({})
+    assert cfg.get("status.enabled") is False
+    assert cfg.get("status.branch") == "ghtools-status"
+    assert cfg.get("status.card") == ["tests", "coverage", "lint", "docs"]
+    assert config.export(cfg)["status"] == {"enabled": False}
+    with pytest.raises(ConfigError, match=r"status\.card: 'stars' is not one of"):
+        config.from_dict({"status": {"card": ["stars"]}})
+    with pytest.raises(ConfigError, match=r"status\.badges: 'size' is not one of"):
+        config.from_dict({"status": {"badges": ["size"]}})
+
+
+def test_status_extra_fragment_names_are_validated():
+    assert config.from_dict({"status": {"extra": ["proton-drive"]}}).get("status.extra") == [
+        "proton-drive"
+    ]
+    with pytest.raises(
+        ConfigError, match=r"status\.extra: 'Bad Name' is not a valid fragment name"
+    ):
+        config.from_dict({"status": {"extra": ["Bad Name"]}})
+
+
+def test_status_branch_must_not_be_the_default_branch():
+    # Review C1: publishing replaces the branch with one orphan commit.
+    with pytest.raises(ConfigError, match=r"status\.branch: must not be the default branch"):
+        config.from_dict({"branch": "master", "status": {"branch": "master"}})
+
+
+@pytest.mark.parametrize("logo", ["/etc/hostname", "../outside.svg"])
+def test_status_logo_must_be_inside_the_repo(tmp_path, logo):
+    cfg = config.from_dict({"status": {"logo": logo}})
+    with pytest.raises(ConfigError, match=r"status\.logo: .* must be a file inside the repository"):
+        config.check_paths(cfg, tmp_path)

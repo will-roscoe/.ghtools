@@ -16,3 +16,4 @@ build/
 .coverage
 coverage.xml
 junit.xml
+ghtools-status-preview/

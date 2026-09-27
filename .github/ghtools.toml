@@ -20,3 +20,9 @@ gates = ["ruff", "ruff-format", "actionlint"]
 [ci.coverage]
 package = "src/ghtools"
 floor = 80
+
+[status]
+enabled = true
+card = ["tests", "coverage", "lint", "release"]
+rows = ["python"]
+badges = ["version", "coverage", "tests", "python"]

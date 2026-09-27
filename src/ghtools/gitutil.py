@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Iterable
@@ -81,7 +82,20 @@ def default_branch(cwd: Path | str = ".") -> str | None:
     out = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=cwd, check=False).strip()
     if out:
         return out.removeprefix("origin/")
-    remote = git("ls-remote", "--symref", "origin", "HEAD", cwd=cwd, check=False)
+    # Never prompt (SSH passphrase, credentials) and never hang: init must stay non-interactive.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", "--symref", "origin", "HEAD"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    remote = proc.stdout if proc.returncode == 0 else ""
     match = re.search(r"^ref: refs/heads/(\S+)\s+HEAD$", remote, re.M)
     return match.group(1) if match else None
 

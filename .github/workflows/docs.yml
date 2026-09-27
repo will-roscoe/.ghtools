@@ -34,6 +34,7 @@ jobs:
       - name: Build
         run: ghtools docs build
       - name: Docs gates
+        id: gates
         run: |
           ghtools gates install --stage docs
           ghtools gates run --stage docs
@@ -45,6 +46,21 @@ jobs:
         if: inputs.deploy
         with:
           path: ${{ steps.html.outputs.dir }}
+
+      - name: Record docs status
+        if: ${{ !cancelled() }}
+        continue-on-error: true  # status must never fail the docs job
+        env:
+          RESULT: ${{ job.status }}
+          GATES: ${{ steps.gates.outcome }}
+        run: ghtools status collect docs --result "$RESULT" --coverage-gate "$GATES" --out "$RUNNER_TEMP/status/docs.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          name: ghtools-status-docs
+          path: ${{ runner.temp }}/status/docs.json
+          retention-days: 1
 
   deploy:
     needs: build

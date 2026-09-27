@@ -10,6 +10,10 @@ from .templates import render
 
 ARCHIVE_DIR = ".github/archive"
 _PREFIX = "pre-ghtools-"
+# Files outside .github that init rewrites (README.md): the original, plus what init wrote,
+# so deinit can tell whether the file was edited since.
+ROOT_FILES = "_root"
+WRITTEN = ".written"
 
 
 def snapshot(root: Path, today: str, commit: str) -> Path:
@@ -33,6 +37,25 @@ def snapshot(root: Path, today: str, commit: str) -> Path:
     return dest
 
 
+def save_root_file(snap: Path, rel: str, original: bytes, written: str) -> None:
+    dest = Path(snap) / ROOT_FILES / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(original)
+    Path(f"{dest}{WRITTEN}").write_text(written, encoding="utf-8")
+
+
+def root_files(snap: Path) -> dict[str, tuple[bytes, str]]:
+    """rel path -> (original bytes, text init wrote), for root files the snapshot holds."""
+    base = Path(snap) / ROOT_FILES
+    out: dict[str, tuple[bytes, str]] = {}
+    for f in sorted(base.rglob("*")) if base.is_dir() else []:
+        if f.is_file() and not f.name.endswith(WRITTEN):
+            written = Path(f"{f}{WRITTEN}")
+            text = written.read_text(encoding="utf-8") if written.is_file() else ""
+            out[f.relative_to(base).as_posix()] = (f.read_bytes(), text)
+    return out
+
+
 def latest_snapshot(root: Path) -> Path | None:
     base = Path(root) / ARCHIVE_DIR
     snaps = sorted(base.glob(f"{_PREFIX}*"), key=lambda p: p.stat().st_mtime_ns)
@@ -44,7 +67,7 @@ def restore(root: Path, snap: Path) -> list[str]:
     restored: list[str] = []
     for file in sorted(p for p in snap.rglob("*") if p.is_file()):
         rel = file.relative_to(snap)
-        if rel.as_posix() == "README.md":
+        if rel.as_posix() == "README.md" or rel.parts[0] == ROOT_FILES:
             continue
         target = root / ".github" / rel
         target.parent.mkdir(parents=True, exist_ok=True)

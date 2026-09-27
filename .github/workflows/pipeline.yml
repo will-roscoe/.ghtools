@@ -134,3 +134,15 @@ jobs:
     uses: $/.github/workflows/release.yml
     with:
       dry-run: ${{ inputs.dry-run }}
+
+  status:
+    needs: [config, ci-python, ci-hacs, ci-lint, docs, release]
+    if: >-
+      always() && needs.config.result == 'success' &&
+      needs.config.outputs.default-ref == 'true' &&
+      fromJSON(needs.config.outputs.config).status.enabled && !inputs.dry-run
+    permissions:
+      contents: write
+    uses: $/.github/workflows/status.yml
+    with:
+      version: ${{ needs.release.outputs.released == 'true' && needs.release.outputs.version || '' }}

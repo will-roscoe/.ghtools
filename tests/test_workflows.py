@@ -162,3 +162,49 @@ def test_hacs_ci_uses_the_configured_python():
         assert setup["with"]["python-version"] == "${{ inputs.python }}"
     pipeline = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
     assert "python_latest" in pipeline["jobs"]["ci-hacs"]["with"]["python"]
+
+
+def test_status_workflow_never_fails_the_pipeline():
+    doc = yaml.safe_load((ROOT / ".github/workflows/status.yml").read_text())
+    job = doc["jobs"]["publish"]
+    assert job["continue-on-error"] is True
+    assert job["permissions"] == {"contents": "write"}
+    pipeline = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    status = pipeline["jobs"]["status"]
+    assert status["uses"] == "$/.github/workflows/status.yml"
+    assert "always()" in status["if"] and "default-ref" in status["if"]
+
+
+def test_ci_legs_and_docs_upload_status_artifacts():
+    ci = (ROOT / ".github/workflows/python-ci.yml").read_text()
+    docs = (ROOT / ".github/workflows/docs.yml").read_text()
+    assert "ghtools status leg" in ci and "ghtools-status-leg-" in ci
+    assert "ghtools status collect docs" in docs and "ghtools-status-docs" in docs
+
+
+def test_status_gets_a_version_only_when_one_was_released():
+    # Review I2: release.yml sets `version` from its decide step even when nothing was pushed.
+    pipeline = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    version = pipeline["jobs"]["status"]["with"]["version"]
+    assert "needs.release.outputs.released == 'true'" in version
+
+
+def test_status_recording_never_fails_ci():
+    # Review I9: a crash while recording status must not fail the test or docs job.
+    for name, job in (("python-ci.yml", "test"), ("docs.yml", "build")):
+        steps = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())["jobs"][job][
+            "steps"
+        ]
+        record = [
+            s
+            for s in steps
+            if "ghtools status" in s.get("run", "")
+            or "ghtools-status" in str(s.get("with", {}).get("name", ""))
+        ]
+        assert len(record) == 2, name
+        assert all(s.get("continue-on-error") is True for s in record), name
+
+
+def test_status_passes_the_github_description():
+    text = (ROOT / ".github/workflows/status.yml").read_text()
+    assert "--description" in text and ".description" in text

@@ -20,6 +20,7 @@ from .config import CONFIG_PATH, dump_toml, from_dict
 from .detect import Detection, detect
 from .errors import PreconditionError
 from .gitutil import dirty_paths, git, is_work_tree_root, tag_exists
+from .status.publish import repo_slug
 from .templates import render
 
 STUB_VERSION = 1
@@ -80,6 +81,59 @@ def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str,
 
 def render_stub(branch: str, pypi: bool, ref: str = STUB_REF) -> str:
     return render("stub.yml.j2", branch=branch, pypi=pypi, ref=ref)
+
+
+BADGE_MAP = {
+    "coverage.svg": "coverage",
+    "pytest.svg": "tests",
+    "ruff.svg": "lint",
+    "pyversion.svg": "python",
+    "version.svg": "version",
+    "interrogate-badge.svg": "docstrings",
+}
+# A reference is replaced whole: its raw/blob URL prefix (or ./) goes with it. The lookbehind
+# stops a bare `.github/...` inside some other URL from matching, so unknown URLs stay intact.
+_SEG = r"[^/\s)\"']+"
+_URL_PREFIX = (
+    r"(?<![\w/.-])(?:"
+    rf"https://raw\.githubusercontent\.com/{_SEG}/{_SEG}/{_SEG}/"
+    rf"|https://github\.com/{_SEG}/{_SEG}/(?:blob|raw)/{_SEG}/"
+    r"|\./)?"
+)
+_STATUS_REF = re.compile(_URL_PREFIX + r"\.github/status/status\.svg")
+_BADGE_REF = re.compile(_URL_PREFIX + r"\.github/badges/([\w.-]+\.svg)")
+
+
+def rewrite_readme(
+    text: str, slug: str, branch: str
+) -> tuple[str, list[str], list[str], list[str]]:
+    """Point README status/badge references at the status branch; leave unknown badges alone.
+
+    Returns the new text, the references rewritten, the references left alone, and the badge
+    names the README now uses (they must be in status.badges or the images 404).
+    """
+    from .status.publish import status_url
+
+    done: list[str] = []
+    left: list[str] = []
+    names: set[str] = set()
+
+    def status_sub(match: re.Match[str]) -> str:
+        done.append(match.group(0))
+        return status_url(slug, branch, "status.svg")
+
+    def badge_sub(match: re.Match[str]) -> str:
+        name = BADGE_MAP.get(match.group(1))
+        if not name:
+            left.append(f".github/badges/{match.group(1)}")
+            return match.group(0)
+        done.append(match.group(0))
+        names.add(name)
+        return status_url(slug, branch, f"badges/{name}.svg")
+
+    text = _STATUS_REF.sub(status_sub, text)
+    text = _BADGE_REF.sub(badge_sub, text)
+    return text, done, sorted(set(left)), sorted(names)
 
 
 @dataclass
@@ -145,12 +199,41 @@ def make_plan(
     gates = gates_from_replaced(replaced_texts, d.values.get("docs.prebuild", []))
     if gates and "ci.gate" not in d.values:
         d.set("ci.gate", gates, "make steps in the workflows ghtools replaces")
+    d.set("status.enabled", True, "ghtools publishes the status card to its own branch")
     cfg = from_dict(_nested(d.values))  # validates the proposal before anything is written
     plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
     pypi = "pypi" in cfg.get("release.publish")
     plan.write[STUB_PATH] = render_stub(cfg.get("branch"), pypi, ref)
     if not keep_old:
         plan.remove += [s for s in REPLACED_SCRIPTS if (root / s).is_file()]
+        status_dir = root / ".github/status"
+        if status_dir.is_dir():
+            plan.remove += [
+                p.relative_to(root).as_posix() for p in sorted(status_dir.rglob("*")) if p.is_file()
+            ]
+        plan.remove += [
+            f".github/badges/{n}"
+            for n in sorted(BADGE_MAP)
+            if (root / ".github/badges" / n).is_file()
+        ]
+    readme = root / "README.md"
+    slug = repo_slug(root)
+    if readme.is_file() and slug:
+        new_text, done, left, names = rewrite_readme(
+            readme.read_text(encoding="utf-8"), slug, cfg.get("status.branch")
+        )
+        if done:
+            plan.write["README.md"] = new_text
+        missing = [n for n in names if n not in cfg.get("status.badges")]
+        if missing:
+            d.set("status.badges", [*cfg.get("status.badges"), *missing], "badges the README uses")
+            cfg = from_dict(_nested(d.values))
+            plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
+        for ref_path in left:
+            plan.notes.append(
+                f"{ref_path}: not produced by ghtools, left as is; the workflow that updated it is "
+                "replaced, so update or remove that README reference"
+            )
     if pypi:
         plan.notes.append(
             "PyPI: change this project's trusted publisher to workflow `ghtools.yml`, "
@@ -246,6 +329,9 @@ def init_repo(
     commit = git("rev-parse", "--short", "HEAD", cwd=root, check=False).strip() or "no commits"
     if plan.archive:
         snap = archive.snapshot(root, today or date.today().isoformat(), commit)
+        for rel, text in plan.write.items():
+            if not rel.startswith(".github/") and (root / rel).is_file():
+                archive.save_root_file(snap, rel, (root / rel).read_bytes(), text)
         out(f"archived .github to {snap.relative_to(root).as_posix()}/")
     for rel in plan.remove:
         (root / rel).unlink()
@@ -305,7 +391,9 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         targets = [
             (Path(".github") / f.relative_to(snap)).as_posix()
             for f in sorted(snap.rglob("*"))
-            if f.is_file() and f.relative_to(snap).as_posix() != "README.md"
+            if f.is_file()
+            and f.relative_to(snap).as_posix() != "README.md"
+            and f.relative_to(snap).parts[0] != archive.ROOT_FILES
         ]
         source = f"snapshot {snap.relative_to(root).as_posix()}"
     elif tag_exists("pre-ghtools", root):
@@ -319,6 +407,17 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         )
     for rel in targets:
         out(f"restore {rel}  (from {source})")
+    root_restores: list[tuple[str, bytes]] = []
+    for rel, (original, written) in (archive.root_files(snap) if snap else {}).items():
+        current = (root / rel).read_text(encoding="utf-8") if (root / rel).is_file() else None
+        if current == written:
+            root_restores.append((rel, original))
+            out(f"restore {rel}  (from {source})")
+        else:
+            out(
+                f"note    {rel} changed since init, so it is left as is; it may still reference "
+                "the ghtools status branch or ghtools:sync markers"
+            )
     for rel in ours:
         out(f"delete  {rel}")
     if dry_run:
@@ -332,6 +431,8 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         )
     if snap is not None:
         archive.restore(root, snap)
+        for rel, original in root_restores:
+            (root / rel).write_bytes(original)
         shutil.rmtree(snap)
         base = root / archive.ARCHIVE_DIR
         if base.exists() and not any(base.iterdir()):

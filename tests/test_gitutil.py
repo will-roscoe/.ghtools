@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 
 import pytest
 
@@ -113,3 +114,13 @@ def test_default_branch_asks_the_remote_when_origin_head_is_unset(git_repo, tmp_
         == ""
     )
     assert gitutil.default_branch(git_repo.path) == "main"
+
+
+def test_default_branch_never_hangs_on_the_remote(git_repo):
+    # Stands in for an SSH passphrase or credential prompt: the transport never answers.
+    git_repo.commit("feat: a")
+    git_repo.run("remote", "add", "origin", "ssh://git@example.invalid/x.git")
+    git_repo.run("config", "core.sshCommand", "sleep 40 #")
+    start = time.monotonic()
+    assert gitutil.default_branch(git_repo.path) is None
+    assert time.monotonic() - start < 20
