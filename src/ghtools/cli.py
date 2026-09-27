@@ -400,6 +400,145 @@ def _local_commands(sub: Any) -> None:
     i.set_defaults(handler=_cmd_hooks_install)
 
 
+def _status_write(path: str, fragment: dict[str, Any]) -> None:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(fragment, indent=2) + "\n", encoding="utf-8")
+
+
+def _cmd_status_leg(args: Any) -> int:
+    from .status import fragments as fr
+
+    root = repo_dir(args)
+    cfg = _config.load_or_defaults(root)
+    docstrings = None
+    if args.canonical and "interrogate" in cfg.get("ci.gates"):
+        proc = subprocess.run(
+            ["interrogate", "-c", "pyproject.toml", "--fail-under", "0"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        docstrings = fr.parse_interrogate(proc.stdout + proc.stderr)
+    _status_write(
+        args.out,
+        fr.leg(
+            args.python,
+            args.runner,
+            args.outcome,
+            args.gates_outcome,
+            fr.parse_junit(root / "junit.xml"),
+            fr.parse_coverage_xml(root / "coverage.xml"),
+            args.canonical,
+            docstrings,
+        ),
+    )
+    return 0
+
+
+def _cmd_status_collect(args: Any) -> int:
+    from .status import fragments as fr
+
+    root = repo_dir(args)
+    cfg = _config.load_or_defaults(root)
+    if args.source == "ci":
+        legs = (
+            [json.loads(p.read_text()) for p in sorted(Path(args.legs).rglob("*.json"))]
+            if args.legs and Path(args.legs).is_dir()
+            else []
+        )
+        fragment = fr.ci_fragment(legs, cfg.get("ci.gates"))
+    elif args.source == "docs":
+        fragment = fr.docs_fragment(args.result, args.coverage_gate)
+    else:
+        fragment = fr.project_fragment(cfg, root, args.version or None, args.open_issues)
+    if fragment:
+        _status_write(args.out, fragment)
+    return 0
+
+
+def _cmd_status_set(args: Any) -> int:
+    from .status.fragments import custom_fragment
+
+    items = [tuple(item.split("=", 1)) for item in args.item]
+    if any(len(i) != 2 for i in items):
+        raise GhtoolsError("--item takes KEY=VALUE")
+    _status_write(args.out, custom_fragment(args.name, args.label, items, args.state))
+    return 0
+
+
+def _cmd_status_publish(args: Any) -> int:
+    from .status.publish import publish
+
+    root = repo_dir(args)
+    fragments = {Path(p).stem: json.loads(Path(p).read_text()) for p in args.files}
+    print(publish(root, fragments, _config.load(root)))
+    return 0
+
+
+def _cmd_status_render(args: Any) -> int:
+    from .status.publish import read_published
+    from .status.render import render_all
+
+    root = repo_dir(args)
+    cfg = _config.load(root)
+    _, data = read_published(root, cfg.get("status.branch"))
+    for path, content in render_all(data, cfg, root).items():
+        target = Path(args.out) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    print(f"wrote {args.out}")
+    return 0
+
+
+def _cmd_status_url(args: Any) -> int:
+    from .status.publish import repo_slug, status_url
+
+    root = repo_dir(args)
+    slug = repo_slug(root)
+    if not slug:
+        raise GhtoolsError("origin is not a GitHub URL; can't form the status URL")
+    print(status_url(slug, _config.load(root).get("status.branch"), args.path))
+    return 0
+
+
+@registrar
+def _status_commands(sub: Any) -> None:
+    p = sub.add_parser("status", help="status card and badges on the status branch")
+    ss = p.add_subparsers(dest="status_cmd", required=True, metavar="<subcommand>")
+    leg = ss.add_parser("leg", help="record one CI matrix leg")
+    for flag in ("--python", "--runner", "--outcome", "--out"):
+        leg.add_argument(flag, required=True)
+    leg.add_argument("--gates-outcome", default="")
+    leg.add_argument("--canonical", action="store_true")
+    leg.set_defaults(handler=_cmd_status_leg)
+    col = ss.add_parser("collect", help="build a ci, docs or project fragment")
+    col.add_argument("source", choices=["ci", "docs", "project"])
+    col.add_argument("--out", required=True)
+    col.add_argument("--legs", default="")
+    col.add_argument("--result", default="success")
+    col.add_argument("--coverage-gate", default=None)
+    col.add_argument("--version", default="")
+    col.add_argument("--open-issues", type=int, default=None)
+    col.set_defaults(handler=_cmd_status_collect)
+    st = ss.add_parser("set", help="write a custom fragment (listed in status.extra)")
+    st.add_argument("name")
+    st.add_argument("--label", required=True)
+    st.add_argument("--item", action="append", default=[], help="KEY=VALUE, repeatable")
+    st.add_argument("--state", choices=["ok", "warn", "fail"], default="ok")
+    st.add_argument("--out", required=True)
+    st.set_defaults(handler=_cmd_status_set)
+    pb = ss.add_parser("publish", help="publish fragment files to the status branch")
+    pb.add_argument("files", nargs="+")
+    pb.set_defaults(handler=_cmd_status_publish)
+    rd = ss.add_parser("render", help="render the published status locally")
+    rd.add_argument("--out", default="ghtools-status-preview")
+    rd.set_defaults(handler=_cmd_status_render)
+    url = ss.add_parser("url", help="print the README URL of a status file")
+    url.add_argument("path", nargs="?", default="status.svg")
+    url.set_defaults(handler=_cmd_status_url)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
