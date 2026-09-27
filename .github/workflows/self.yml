@@ -1,0 +1,43 @@
+name: self
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Compute the release without writing anything
+        type: boolean
+        default: true
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: self-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  pipeline:
+    uses: $/.github/workflows/pipeline.yml
+    with:
+      dry-run: ${{ inputs.dry-run || false }}
+
+  major-tag:
+    needs: pipeline
+    if: needs.pipeline.outputs.released == 'true' && !contains(needs.pipeline.outputs.tag, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Move the floating major tag
+        env:
+          TAG: ${{ needs.pipeline.outputs.tag }}
+        run: |
+          set -euo pipefail
+          major="${TAG%%.*}"
+          git tag -f "$major" "$TAG"
+          git push -f origin "refs/tags/$major"

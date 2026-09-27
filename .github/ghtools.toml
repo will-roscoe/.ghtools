@@ -1,0 +1,22 @@
+# ghtools settings for ghtools itself
+schema = 1
+branch = "main"
+profile = "python"
+
+[version]
+source = "tag"
+
+[release]
+publish = ["github"]
+changelog = "CHANGELOG.md"
+
+[ci]
+python = ["3.11", "3.12", "3.13"]
+install = ".[dev]"
+test = "pytest -q"
+paths = ["**.py", "pyproject.toml", ".github/**", "src/ghtools/templates/**"]
+gates = ["ruff", "ruff-format", "actionlint"]
+
+[ci.coverage]
+package = "src/ghtools"
+floor = 80
