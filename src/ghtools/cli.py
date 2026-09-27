@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
@@ -185,6 +186,112 @@ def _release_commands(sub: Any) -> None:
     b = rs.add_parser("build", help="build release assets")
     b.add_argument("--out", default="dist")
     b.set_defaults(handler=_cmd_release_build)
+
+
+def _run_checked(cmd: list[str] | str, cwd: Path, what: str) -> int:
+    from .errors import CheckFailed
+
+    argv = ["bash", "-o", "pipefail", "-c", cmd] if isinstance(cmd, str) else cmd
+    proc = subprocess.run(argv, cwd=cwd)
+    if proc.returncode != 0:
+        raise CheckFailed(f"{what} failed (exit {proc.returncode})")
+    return 0
+
+
+def _cmd_gates_install(args: Any) -> int:
+    from . import ci, gates
+
+    root = repo_dir(args)
+    reqs = gates.pip_requirements(gates.resolve(_config.load(root), args.stage))
+    if not reqs:
+        return 0
+    cmd = [ci.python(), "-m", "pip", "install", "--quiet", *reqs]
+    return _run_checked(cmd, root, "gate install")
+
+
+def _cmd_gates_run(args: Any) -> int:
+    from . import gates
+
+    root = repo_dir(args)
+    gates.run(gates.resolve(_config.load_or_defaults(root), args.stage), root, args.warn_only)
+    return 0
+
+
+@registrar
+def _gates_commands(sub: Any) -> None:
+    p = sub.add_parser("gates", help="install or run lint/check gates")
+    gs = p.add_subparsers(dest="gates_cmd", required=True, metavar="<subcommand>")
+    for name, handler in (("install", _cmd_gates_install), ("run", _cmd_gates_run)):
+        g = gs.add_parser(name)
+        g.add_argument("--stage", choices=["test", "docs"], default="test")
+        if name == "run":
+            g.add_argument("--warn-only", action="store_true", help="report but exit 0")
+        g.set_defaults(handler=handler)
+
+
+def _cmd_ci_install(args: Any) -> int:
+    from . import ci
+
+    root = repo_dir(args)
+    return _run_checked(ci.install_command(_config.load(root)), root, "install")
+
+
+def _cmd_ci_test(args: Any) -> int:
+    from . import ci
+
+    root = repo_dir(args)
+    return _run_checked(ci.test_command(_config.load(root)), root, "tests")
+
+
+def _cmd_ci_should_run(args: Any) -> int:
+    from . import ci
+
+    root = repo_dir(args)
+    print("true" if ci.should_run(_config.load(root), root, args.base) else "false")
+    return 0
+
+
+@registrar
+def _ci_commands(sub: Any) -> None:
+    p = sub.add_parser("ci", help="CI test-job steps")
+    cs = p.add_subparsers(dest="ci_cmd", required=True, metavar="<subcommand>")
+    cs.add_parser("install", help="pip install ci.install").set_defaults(handler=_cmd_ci_install)
+    cs.add_parser("test", help="run ci.test with coverage/junit").set_defaults(handler=_cmd_ci_test)
+    s = cs.add_parser("should-run", help="does a push since BASE touch ci.paths? (true/false)")
+    s.add_argument("--base", default="")
+    s.set_defaults(handler=_cmd_ci_should_run)
+
+
+def _cmd_docs_install(args: Any) -> int:
+    from . import docs
+
+    root = repo_dir(args)
+    return _run_checked(docs.install_command(_config.load(root)), root, "docs install")
+
+
+def _cmd_docs_build(args: Any) -> int:
+    from . import docs
+
+    root = repo_dir(args)
+    for cmd in docs.build_commands(_config.load(root)):
+        _run_checked(cmd, root, cmd[0])
+    return 0
+
+
+def _cmd_docs_html_dir(args: Any) -> int:
+    from . import docs
+
+    print(docs.html_dir(_config.load(repo_dir(args))))
+    return 0
+
+
+@registrar
+def _docs_commands(sub: Any) -> None:
+    p = sub.add_parser("docs", help="Sphinx docs steps")
+    ds = p.add_subparsers(dest="docs_cmd", required=True, metavar="<subcommand>")
+    ds.add_parser("install").set_defaults(handler=_cmd_docs_install)
+    ds.add_parser("build").set_defaults(handler=_cmd_docs_build)
+    ds.add_parser("html-dir").set_defaults(handler=_cmd_docs_html_dir)
 
 
 def build_parser() -> argparse.ArgumentParser:

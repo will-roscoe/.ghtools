@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .errors import CheckFailed
+
+if TYPE_CHECKING:
+    from .config import Config
 
 
 @dataclass(frozen=True)
@@ -37,3 +46,42 @@ BUILTIN: dict[str, GateSpec] = {
         stage="docs",
     ),
 }
+
+
+def resolve(cfg: Config, stage: str) -> list[GateSpec]:
+    """Built-in gates listed in ci.gates, then custom [[ci.gate]]s, for one stage."""
+    docs_dir = cfg.get("docs.dir")
+    specs = [BUILTIN[name] for name in cfg.get("ci.gates")]
+    specs = [GateSpec(s.name, s.run.replace("{docs_dir}", docs_dir), s.stage, s.pip) for s in specs]
+    specs += [GateSpec(row["name"], row["run"], row["after"]) for row in cfg.get("ci.gate")]
+    return [s for s in specs if s.stage == stage]
+
+
+def pip_requirements(specs: list[GateSpec]) -> list[str]:
+    seen: list[str] = []
+    for spec in specs:
+        for req in spec.pip:
+            if req not in seen:
+                seen.append(req)
+    return seen
+
+
+def run(specs: list[GateSpec], cwd: Path, warn_only: bool = False) -> list[str]:
+    """Run every gate (never stopping early); return failed names, or raise CheckFailed."""
+    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    failed: list[str] = []
+    for spec in specs:
+        print(f"::group::gate {spec.name}" if in_actions else f"== gate {spec.name}", flush=True)
+        proc = subprocess.run(["bash", "-o", "pipefail", "-c", spec.run], cwd=cwd)
+        if in_actions:
+            print("::endgroup::", flush=True)
+        if proc.returncode != 0:
+            failed.append(spec.name)
+            if in_actions:
+                label = "::warning::" if warn_only else "::error::"
+            else:
+                label = ""
+            print(f"{label}gate {spec.name} failed (exit {proc.returncode})", flush=True)
+    if failed and not warn_only:
+        raise CheckFailed(f"gates failed: {', '.join(failed)}")
+    return failed
