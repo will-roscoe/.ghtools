@@ -1,0 +1,73 @@
+name: ghtools python ci
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: JSON {"include":[{"python":..,"runner":..}]} from `ghtools config export`
+        type: string
+        required: true
+      codecov:
+        type: boolean
+        default: false
+      flags:
+        type: string
+        default: python-version
+      docker:
+        type: boolean
+        default: false
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  test:
+    name: test (${{ matrix.python }}, ${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: ghtools ci install
+      - name: Gates
+        if: strategy.job-index == 0
+        run: |
+          ghtools gates install --stage test
+          ghtools gates run --stage test
+      - name: Test
+        run: ghtools ci test
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && inputs.codecov }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          disable_search: true
+          flags: ${{ inputs.flags == 'python-version' && format('py{0}', matrix.python) || '' }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && inputs.codecov }}
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: junit.xml
+          disable_search: true
+          flags: ${{ inputs.flags == 'python-version' && format('py{0}', matrix.python) || '' }}
+
+  docker:
+    if: inputs.docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build -t ghtools-ci .
