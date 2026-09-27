@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
@@ -71,6 +72,18 @@ def _apply_answers(d: Detection, answers: dict[str, str]) -> None:
             d.values.pop("docs.dir", None)
         else:
             d.set(key, answer, "chosen at init")
+
+
+def _flatten(tree: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Inverse of `_nested`: a parsed ghtools.toml as dotted keys (table arrays stay lists)."""
+    flat: dict[str, Any] = {}
+    for key, value in tree.items():
+        dotted = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            flat.update(_flatten(value, dotted))
+        else:
+            flat[dotted] = value
+    return flat
 
 
 def _nested(values: dict[str, Any]) -> dict[str, Any]:
@@ -152,8 +165,13 @@ def init_repo(
     plan, d = make_plan(root, answers, keep_old, archive_mode, ref)
 
     if existing.is_file():  # re-run: compare, write only the settings file and only with --write
-        old = existing.read_text(encoding="utf-8").splitlines(keepends=True)
-        new = plan.write[CONFIG_PATH].splitlines(keepends=True)
+        current = existing.read_text(encoding="utf-8")
+        # Merge, never delete: a key detection can no longer see (its evidence was archived and
+        # pruned, or it was set by hand) keeps its current value.
+        merged = {**_flatten(tomllib.loads(current)), **d.values}
+        proposed = dump_toml(merged, d.evidence)
+        old = current.splitlines(keepends=True)
+        new = proposed.splitlines(keepends=True)
         diff = list(
             difflib.unified_diff(old, new, CONFIG_PATH + " (current)", CONFIG_PATH + " (detected)")
         )
@@ -163,7 +181,7 @@ def init_repo(
                 raise PreconditionError(
                     f"uncommitted changes in {CONFIG_PATH}; commit or stash first"
                 )
-            existing.write_text(plan.write[CONFIG_PATH], encoding="utf-8")
+            existing.write_text(proposed, encoding="utf-8")
             out(f"wrote {CONFIG_PATH}")
         return 0
 

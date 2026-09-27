@@ -35,9 +35,16 @@ def _read(path: Path) -> str:
 
 
 def _workflows(root: Path) -> dict[str, str]:
+    """Live workflows, plus those archived by an earlier `init` (their evidence still counts)."""
     wf_dir = root / ".github/workflows"
-    files = sorted([*wf_dir.glob("*.yml"), *wf_dir.glob("*.yaml")])
-    return {p.name: _read(p) for p in files if p.name != "ghtools.yml"}
+    files = {p.name: p for p in [*wf_dir.glob("*.yml"), *wf_dir.glob("*.yaml")]}
+    snapshots = sorted((root / ".github/archive").glob("pre-ghtools-*"))
+    if snapshots:
+        archived = snapshots[-1] / "workflows"
+        for p in [*archived.glob("*.yml"), *archived.glob("*.yaml")]:
+            files.setdefault(p.name, p)
+    files.pop("ghtools.yml", None)
+    return {name: _read(files[name]) for name in sorted(files)}
 
 
 def _project_version(pyproject: str) -> str | None:

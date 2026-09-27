@@ -154,3 +154,38 @@ def test_dry_run_shows_notes(git_repo):
     lines: list[str] = []
     scaffold.init_repo(git_repo.path, yes=True, dry_run=True, out=lines.append)
     assert any(line.startswith("NOTE: PyPI") for line in lines)
+
+
+HACS_FILES = {
+    "hacs.json": "{}",
+    "custom_components/intercom/manifest.json": '{"version": "0.4.0"}',
+    ".github/workflows/test.yaml": (
+        "jobs:\n  t:\n    steps:\n      - uses: actions/setup-python@v5\n        with:\n"
+        '          python-version: "3.13"\n      - run: pip install pytest pyyaml voluptuous\n'
+        "      - run: pytest -q\n"
+    ),
+}
+
+
+def test_rerun_after_init_still_sees_the_archived_workflows(git_repo):
+    # Review I6: the old workflows live only in the archive after init.
+    git_repo.commit("feat: init", HACS_FILES)
+    scaffold.init_repo(git_repo.path, yes=True, out=_quiet)
+    git_repo.run("add", "-A")
+    git_repo.run("commit", "-q", "-m", "ci: switch to ghtools")
+    lines: list[str] = []
+    scaffold.init_repo(git_repo.path, yes=True, out=lines.append)
+    assert lines == [".github/ghtools.toml matches what detection finds now."]
+
+
+def test_rerun_write_never_deletes_existing_keys(git_repo):
+    git_repo.commit("feat: init", HACS_FILES)
+    scaffold.init_repo(git_repo.path, yes=True, archive_mode="none", out=_quiet)
+    git_repo.run("add", "-A")
+    git_repo.run(
+        "commit", "-q", "-m", "ci: switch to ghtools"
+    )  # old workflows are gone, no archive
+    scaffold.init_repo(git_repo.path, yes=True, write=True, out=_quiet)
+    cfg = config.load(git_repo.path)
+    assert cfg.get("ci.install") == "pytest pyyaml voluptuous"
+    assert cfg.get("ci.python") == ["3.13"]
