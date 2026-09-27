@@ -359,6 +359,30 @@ def _doctor_command(sub: Any) -> None:
     p.set_defaults(handler=_cmd_doctor)
 
 
+def _cmd_resync(args: Any) -> int:
+    from .localtools import resync
+
+    return resync(repo_dir(args))
+
+
+def _cmd_hooks_install(args: Any) -> int:
+    from .localtools import install_pre_push
+
+    print(f"installed {install_pre_push(repo_dir(args))}")
+    return 0
+
+
+@registrar
+def _local_commands(sub: Any) -> None:
+    r = sub.add_parser("resync", help="after a push: fetch tags, fast-forward, reinstall")
+    r.set_defaults(handler=_cmd_resync)
+    h = sub.add_parser("hooks", help="local git hooks")
+    hs = h.add_subparsers(dest="hooks_cmd", required=True, metavar="<subcommand>")
+    i = hs.add_parser("install", help="install the warn-only pre-push hook")
+    i.add_argument("--pre-push", action="store_true", default=True)
+    i.set_defaults(handler=_cmd_hooks_install)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
