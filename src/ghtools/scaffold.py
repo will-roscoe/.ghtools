@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import re
+import shutil
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -16,7 +17,7 @@ from .ci import STUB_PATH
 from .config import CONFIG_PATH, dump_toml, from_dict
 from .detect import Detection, detect
 from .errors import PreconditionError
-from .gitutil import dirty_paths, git, is_work_tree_root
+from .gitutil import dirty_paths, git, is_work_tree_root, tag_exists
 from .templates import render
 
 STUB_VERSION = 1
@@ -205,4 +206,69 @@ def init_repo(
         "Next: review `git status` / `git diff`, commit, push, then run `ghtools doctor`.\n"
         "Suggested permanent restore point: git tag pre-ghtools HEAD && git push origin pre-ghtools"
     )
+    return 0
+
+
+def _edited_after_commit(root: Path, paths: list[str]) -> list[str]:
+    """Tracked `paths` whose working copy differs from HEAD, i.e. edited after committing.
+
+    Right after an uncommitted `init`, the ghtools files are untracked and the replaced
+    workflows are deleted: exactly the state deinit undoes, so none of that counts.
+    """
+    existing = [p for p in paths if (root / p).exists()]
+    if not existing:
+        return []
+    tracked = git("ls-files", "--", *existing, cwd=root).split()
+    if not tracked:
+        return []
+    diff = git("diff", "--name-only", "HEAD", "--", *tracked, cwd=root, check=False)
+    return sorted(line for line in diff.splitlines() if line)
+
+
+def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None] = print) -> int:
+    root = Path(root).resolve()
+    if not is_work_tree_root(root):
+        raise PreconditionError("run ghtools deinit from the repository root")
+    snap = archive.latest_snapshot(root)
+    ours = [p for p in (CONFIG_PATH, STUB_PATH) if (root / p).exists()]
+    if snap is not None:
+        targets = [
+            (Path(".github") / f.relative_to(snap)).as_posix()
+            for f in sorted(snap.rglob("*"))
+            if f.is_file() and f.relative_to(snap).as_posix() != "README.md"
+        ]
+        source = f"snapshot {snap.relative_to(root).as_posix()}"
+    elif tag_exists("pre-ghtools", root):
+        listing = git("ls-tree", "-r", "--name-only", "pre-ghtools", "--", ".github", cwd=root)
+        targets = [line for line in listing.splitlines() if line]
+        source = "tag pre-ghtools"
+    else:
+        raise PreconditionError(
+            "no .github/archive/pre-ghtools-* snapshot and no pre-ghtools tag: "
+            "nothing to restore from"
+        )
+    for rel in targets:
+        out(f"restore {rel}  (from {source})")
+    for rel in ours:
+        out(f"delete  {rel}")
+    if dry_run:
+        out("Dry run: nothing written.")
+        return 0
+    edited = _edited_after_commit(root, [*ours, *targets])
+    if edited:
+        raise PreconditionError(
+            "uncommitted changes in files deinit would touch: " + ", ".join(edited)
+        )
+    if snap is not None:
+        archive.restore(root, snap)
+        shutil.rmtree(snap)
+        base = root / archive.ARCHIVE_DIR
+        if base.exists() and not any(base.iterdir()):
+            base.rmdir()
+    else:
+        git("checkout", "pre-ghtools", "--", ".github", cwd=root)
+    for rel in ours:
+        (root / rel).unlink()
+    out("ghtools removed.")
+    out("If a ghtools-status branch exists: git push origin --delete ghtools-status")
     return 0

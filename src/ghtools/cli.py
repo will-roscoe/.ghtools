@@ -320,6 +320,29 @@ def _init_command(sub: Any) -> None:
     p.set_defaults(handler=_cmd_init)
 
 
+def _cmd_deinit(args: Any) -> int:
+    from .scaffold import deinit_repo
+
+    return deinit_repo(Path(args.cwd), dry_run=args.dry_run)
+
+
+def _cmd_archive_prune(args: Any) -> int:
+    from .archive import prune
+
+    print("removed .github/archive" if prune(repo_dir(args)) else "no .github/archive to remove")
+    return 0
+
+
+@registrar
+def _deinit_commands(sub: Any) -> None:
+    p = sub.add_parser("deinit", help="undo ghtools init in the repository you're in")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(handler=_cmd_deinit)
+    a = sub.add_parser("archive", help="manage the pre-ghtools archive")
+    asub = a.add_subparsers(dest="archive_cmd", required=True, metavar="<subcommand>")
+    asub.add_parser("prune", help="delete .github/archive").set_defaults(handler=_cmd_archive_prune)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
