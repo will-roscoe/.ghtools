@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import re
 import shutil
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -225,6 +226,25 @@ def _edited_after_commit(root: Path, paths: list[str]) -> list[str]:
     return sorted(line for line in diff.splitlines() if line)
 
 
+def _untracked_differing(root: Path, targets: list[str], snap: Path | None) -> list[str]:
+    """Untracked restore targets whose content isn't the archived copy: new work to protect."""
+    found: list[str] = []
+    for rel in targets:
+        path = root / rel
+        if not path.is_file() or git("ls-files", "--", rel, cwd=root).strip():
+            continue
+        if snap is not None:
+            archived = (snap / Path(rel).relative_to(".github")).read_bytes()
+        else:
+            proc = subprocess.run(
+                ["git", "show", f"pre-ghtools:{rel}"], cwd=root, capture_output=True
+            )
+            archived = proc.stdout
+        if path.read_bytes() != archived:
+            found.append(rel)
+    return found
+
+
 def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None] = print) -> int:
     root = Path(root).resolve()
     if not is_work_tree_root(root):
@@ -255,6 +275,7 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         out("Dry run: nothing written.")
         return 0
     edited = _edited_after_commit(root, [*ours, *targets])
+    edited += _untracked_differing(root, targets, snap)
     if edited:
         raise PreconditionError(
             "uncommitted changes in files deinit would touch: " + ", ".join(edited)

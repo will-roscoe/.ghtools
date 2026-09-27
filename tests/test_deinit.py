@@ -77,3 +77,24 @@ def test_deinit_dry_run(git_repo):
     scaffold.deinit_repo(repo.path, dry_run=True, out=lines.append)
     assert repo.run("status", "--porcelain") == before
     assert any("restore .github/workflows/ci.yml" in line for line in lines)
+
+
+def test_deinit_refuses_to_overwrite_new_untracked_work(git_repo):
+    # Review I5: an untracked file at a restore target is someone's new work.
+    repo = _repo(git_repo)
+    scaffold.init_repo(repo.path, yes=True, out=_quiet)
+    repo.run("add", "-A")
+    repo.run("commit", "-q", "-m", "ci: switch")
+    (repo.path / ".github/workflows/ci.yml").write_text("MY NEW WORK\n")
+    with pytest.raises(PreconditionError, match=r"uncommitted changes.*\.github/workflows/ci\.yml"):
+        scaffold.deinit_repo(repo.path, out=_quiet)
+    assert (repo.path / ".github/workflows/ci.yml").read_text() == "MY NEW WORK\n"
+
+
+def test_deinit_accepts_an_untracked_file_identical_to_the_archived_copy(git_repo):
+    repo = _repo(git_repo)
+    scaffold.init_repo(repo.path, yes=True, out=_quiet)
+    repo.run("add", "-A")
+    repo.run("commit", "-q", "-m", "ci: switch")
+    (repo.path / ".github/workflows/ci.yml").write_text(CI)
+    assert scaffold.deinit_repo(repo.path, out=_quiet) == 0
