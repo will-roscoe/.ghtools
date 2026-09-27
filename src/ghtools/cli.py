@@ -91,6 +91,102 @@ def _config_commands(sub: Any) -> None:
     g.set_defaults(handler=_cmd_config_get)
 
 
+def _cmd_version_current(args: Any) -> int:
+    tag = gitutil.latest_tag(repo_dir(args))
+    if tag:
+        print(tag)
+    return 0
+
+
+def _cmd_version_next(args: Any) -> int:
+    from .version import compute_next_version, explain
+
+    root = repo_dir(args)
+    cfg = _config.load_or_defaults(root)
+    current = gitutil.latest_tag(root)
+    messages = gitutil.log_messages(gitutil.since_range(current), root)
+    if args.explain:
+        for first, effect in explain(messages):
+            print(f"{effect:<6} {first}", file=sys.stderr)
+    nxt = compute_next_version(current, messages, cfg.get("version.zero-major-breaking"))
+    if nxt:
+        print(nxt)
+    return 0
+
+
+@registrar
+def _version_commands(sub: Any) -> None:
+    p = sub.add_parser("version", help="versions from Conventional Commits")
+    vs = p.add_subparsers(dest="version_cmd", required=True, metavar="<subcommand>")
+    vs.add_parser("current", help="newest SemVer release tag").set_defaults(
+        handler=_cmd_version_current
+    )
+    n = vs.add_parser("next", help="version a merge would release now (nothing if none)")
+    n.add_argument("--explain", action="store_true", help="list each commit's effect on stderr")
+    n.set_defaults(handler=_cmd_version_next)
+
+
+def _cmd_release_decide(args: Any) -> int:
+    from . import release
+
+    root = repo_dir(args)
+    decision = release.decide(_config.load_or_defaults(root), root)
+    if args.github_output:
+        write_github_output(decision.as_outputs())
+    if args.summary:
+        print(decision.summary())
+    elif not args.github_output:
+        print(decision.reason)
+    return 0
+
+
+def _cmd_release_prepare(args: Any) -> int:
+    from . import release
+
+    root = repo_dir(args)
+    for path in release.prepare(_config.load_or_defaults(root), root, args.version.lstrip("v")):
+        print(path)
+    return 0
+
+
+def _cmd_release_notes(args: Any) -> int:
+    from . import release
+
+    root = repo_dir(args)
+    text = release.notes(_config.load_or_defaults(root), root, args.version)
+    if text:
+        print(text)
+    return 0
+
+
+def _cmd_release_build(args: Any) -> int:
+    from . import release
+
+    root = repo_dir(args)
+    for path in release.build(_config.load_or_defaults(root), root, args.out):
+        print(path.relative_to(root))
+    return 0
+
+
+@registrar
+def _release_commands(sub: Any) -> None:
+    p = sub.add_parser("release", help="release steps used by release.yml")
+    rs = p.add_subparsers(dest="release_cmd", required=True, metavar="<subcommand>")
+    d = rs.add_parser("decide", help="decide whether and what to release")
+    d.add_argument("--github-output", action="store_true", help="write outputs to $GITHUB_OUTPUT")
+    d.add_argument("--summary", action="store_true", help="print a markdown summary")
+    d.set_defaults(handler=_cmd_release_decide)
+    pr = rs.add_parser("prepare", help="write version file + changelog; print changed paths")
+    pr.add_argument("version")
+    pr.set_defaults(handler=_cmd_release_prepare)
+    no = rs.add_parser("notes", help="print the changelog section for a version")
+    no.add_argument("version")
+    no.set_defaults(handler=_cmd_release_notes)
+    b = rs.add_parser("build", help="build release assets")
+    b.add_argument("--out", default="dist")
+    b.set_defaults(handler=_cmd_release_build)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
