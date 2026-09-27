@@ -118,3 +118,11 @@ def test_pipeline_contract_matches_the_stub():
     assert {"config", "ci-python", "ci-hacs", "ci-lint", "docs", "release"} <= set(jobs)
     for name in ("ci-python", "ci-hacs", "ci-lint", "docs", "release"):
         assert jobs[name]["uses"].startswith("$/.github/workflows/"), name
+
+
+def test_tests_still_run_and_report_when_a_gate_fails():
+    # Learned from sph-dev #100: a failing lint gate must not hide coverage and test results.
+    doc = yaml.safe_load((ROOT / ".github/workflows/python-ci.yml").read_text())
+    steps = {s.get("name"): s for s in doc["jobs"]["test"]["steps"]}
+    assert steps["Test"]["if"] == "${{ !cancelled() }}"
+    assert "!cancelled()" in steps["Upload coverage to Codecov"]["if"]

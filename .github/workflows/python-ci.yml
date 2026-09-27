@@ -44,6 +44,9 @@ jobs:
           ghtools gates install --stage test
           ghtools gates run --stage test
       - name: Test
+        # Runs even if a gate failed, so coverage and test results always report;
+        # the failed gate still fails the job.
+        if: ${{ !cancelled() }}
         run: ghtools ci test
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && inputs.codecov }}
