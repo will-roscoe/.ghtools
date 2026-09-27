@@ -1,4 +1,4 @@
-"""Sphinx docs commands for docs.yml."""
+"""Sphinx docs commands for the pipeline's docs job."""
 
 from __future__ import annotations
 

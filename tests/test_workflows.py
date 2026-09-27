@@ -91,30 +91,37 @@ def test_actionlint_passes_with_the_builtin_ignores():
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_release_workflow_contract():
-    doc = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
-    call = doc[True]["workflow_call"]
-    assert set(call["outputs"]) == {"released", "tag", "version", "dist-artifact"}
-    assert call["inputs"]["dry-run"]["type"] == "boolean"
-    job = doc["jobs"]["release"]
+PIPELINE = ROOT / ".github/workflows/pipeline.yml"
+
+
+def _jobs():
+    return yaml.safe_load(PIPELINE.read_text())["jobs"]
+
+
+def _step(job, name):
+    return next(s for s in _jobs()[job]["steps"] if s.get("name") == name)
+
+
+def test_release_job_contract():
+    job = _jobs()["release"]
     assert job["permissions"] == {"contents": "write"}
     assert job["outputs"]["dist-artifact"] == "ghtools-dist"
-    text = (ROOT / ".github/workflows/release.yml").read_text()
+    text = PIPELINE.read_text()
     assert "[skip ci]" in text
     # Rebasing would fold commits that never passed this run's CI into the release (review I2).
     assert "pull --rebase" not in text
     steps = [s.get("name") for s in job["steps"]]
     # Tag locally, build, and only then push: a failed build leaves nothing pushed (review I3).
     assert steps.index("Build") < steps.index("Push release commit and tag")
-    push = next(s for s in job["steps"] if s.get("name") == "Push release commit and tag")
+    push = _step("release", "Push release commit and tag")
     assert "::notice::" in push["run"] and "pushed=false" in push["run"]
-    assert any(s.get("name") == "Check out the tag to resume" for s in job["steps"])
+    assert "Check out the tag to resume" in steps
 
 
 def test_pipeline_contract_matches_the_stub():
     from ghtools.scaffold import render_stub
 
-    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    doc = yaml.safe_load(PIPELINE.read_text())
     call = doc[True]["workflow_call"]
     assert set(call["outputs"]) == {"released", "tag", "version", "dist-artifact", "dispatch"}
     assert set(call["inputs"]) == {"dry-run"}
@@ -122,18 +129,24 @@ def test_pipeline_contract_matches_the_stub():
     stub = yaml.safe_load(render_stub("main", pypi=True))
     assert set(stub["jobs"]["pipeline"]["with"]) <= set(call["inputs"])
     assert set(stub["jobs"]["pipeline"]["secrets"]) <= set(call["secrets"])
-    jobs = doc["jobs"]
-    assert {"config", "ci-python", "ci-hacs", "ci-lint", "docs", "release"} <= set(jobs)
-    for name in ("ci-python", "ci-hacs", "ci-lint", "docs", "release"):
-        assert jobs[name]["uses"].startswith("$/.github/workflows/"), name
+    expected = {
+        "config",
+        "test",
+        "tests-passed",
+        "hacs",
+        "hassfest",
+        "lint",
+        "docs",
+        "release",
+        "status",
+    }
+    assert expected <= set(doc["jobs"])
 
 
 def test_tests_still_run_and_report_when_a_gate_fails():
     # Learned from sph-dev #100: a failing lint gate must not hide coverage and test results.
-    doc = yaml.safe_load((ROOT / ".github/workflows/python-ci.yml").read_text())
-    steps = {s.get("name"): s for s in doc["jobs"]["test"]["steps"]}
-    assert steps["Test"]["if"] == "${{ !cancelled() }}"
-    assert "!cancelled()" in steps["Upload coverage to Codecov"]["if"]
+    assert _step("test", "Test")["if"] == "${{ !cancelled() }}"
+    assert "!cancelled()" in _step("test", "Upload coverage to Codecov")["if"]
 
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
@@ -154,86 +167,68 @@ def test_config_job_can_see_a_pending_resume():
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
 
 
-def test_hacs_ci_uses_the_configured_python():
+def test_hacs_jobs_use_the_configured_python():
     # Review I7: ios2ha-camera-hass needs 3.14; a hardcoded 3.13 breaks its install.
-    hacs = yaml.safe_load((ROOT / ".github/workflows/hacs-ci.yml").read_text())
-    assert hacs[True]["workflow_call"]["inputs"]["python"]["type"] == "string"
-    for job in ("lint", "test"):
-        setup = next(s for s in hacs["jobs"][job]["steps"] if "setup-python" in s.get("uses", ""))
-        assert setup["with"]["python-version"] == "${{ inputs.python }}"
-    pipeline = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
-    assert "python_latest" in pipeline["jobs"]["ci-hacs"]["with"]["python"]
+    for job in ("hacs-lint", "hacs-test"):
+        setup = next(s for s in _jobs()[job]["steps"] if "setup-python" in s.get("uses", ""))
+        assert "python_latest" in setup["with"]["python-version"]
 
 
-def test_status_workflow_never_fails_the_pipeline():
-    doc = yaml.safe_load((ROOT / ".github/workflows/status.yml").read_text())
-    job = doc["jobs"]["publish"]
+def test_status_job_never_fails_the_pipeline():
+    job = _jobs()["status"]
     assert job["continue-on-error"] is True
     assert job["permissions"] == {"contents": "write"}
-    pipeline = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
-    status = pipeline["jobs"]["status"]
-    assert status["uses"] == "$/.github/workflows/status.yml"
-    assert "always()" in status["if"] and "default-ref" in status["if"]
+    assert "always()" in job["if"] and "default-ref" in job["if"]
 
 
 def test_ci_legs_and_docs_upload_status_artifacts():
-    ci = (ROOT / ".github/workflows/python-ci.yml").read_text()
-    docs = (ROOT / ".github/workflows/docs.yml").read_text()
-    assert "ghtools status leg" in ci and "ghtools-status-leg-" in ci
-    assert "ghtools status collect docs" in docs and "ghtools-status-docs" in docs
+    text = PIPELINE.read_text()
+    assert "ghtools status leg" in text and "ghtools-status-leg-" in text
+    assert "ghtools status collect docs" in text and "ghtools-status-docs" in text
 
 
 def test_status_gets_a_version_only_when_one_was_released():
-    # Review I2: release.yml sets `version` from its decide step even when nothing was pushed.
-    pipeline = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
-    version = pipeline["jobs"]["status"]["with"]["version"]
+    # Review I2: the release job sets `version` from its decide step even when nothing was pushed.
+    version = _step("status", "Collect and publish")["env"]["VERSION"]
     assert "needs.release.outputs.released == 'true'" in version
 
 
 def test_status_recording_never_fails_ci():
     # Review I9: a crash while recording status must not fail the test or docs job.
-    for name, job in (("python-ci.yml", "test"), ("docs.yml", "build")):
-        steps = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())["jobs"][job][
-            "steps"
-        ]
+    for job in ("test", "docs"):
         record = [
             s
-            for s in steps
+            for s in _jobs()[job]["steps"]
             if "ghtools status" in s.get("run", "")
             or "ghtools-status" in str(s.get("with", {}).get("name", ""))
         ]
-        assert len(record) == 2, name
-        assert all(s.get("continue-on-error") is True for s in record), name
+        assert len(record) == 2, job
+        assert all(s.get("continue-on-error") is True for s in record), job
 
 
 def test_status_passes_the_github_description():
-    text = (ROOT / ".github/workflows/status.yml").read_text()
-    assert "--description" in text and ".description" in text
+    run = _step("status", "Collect and publish")["run"]
+    assert "--description" in run and ".description" in run
 
 
 def test_config_job_computes_the_matrix_for_the_change():
-    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
-    step = next(s for s in doc["jobs"]["config"]["steps"] if s.get("id") == "matrix")
+    jobs = _jobs()
+    step = next(s for s in jobs["config"]["steps"] if s.get("id") == "matrix")
     assert "ghtools ci matrix" in step["run"] and "--github-output" in step["run"]
     assert "pull_request.base.sha" in step["env"]["BASE"]
-    ci_python = doc["jobs"]["ci-python"]
-    assert ci_python["with"]["matrix"] == "${{ needs.config.outputs.matrix }}"
-    assert "needs.config.outputs.any" in ci_python["with"]["tests"]
-    assert "subprojects" in ci_python["if"]  # umbrella repos with in-tree subprojects use python-ci
-    assert "'python'" in ci_python["with"]["gates"]  # umbrella gates stay in ci-lint, run once
+    test = jobs["test"]
+    assert test["strategy"]["matrix"] == "${{ fromJSON(needs.config.outputs.matrix) }}"
+    assert "needs.config.outputs.any" in test["if"]
+    assert "subprojects" in test["if"]  # umbrella repos with in-tree subprojects run these legs
+    assert "'python'" in _step("test", "Gates")["if"]  # umbrella gates run once, in the lint job
 
 
 def test_subproject_legs_and_tests_passed_job():
-    doc = yaml.safe_load((ROOT / ".github/workflows/python-ci.yml").read_text())
-    text = (ROOT / ".github/workflows/python-ci.yml").read_text()
+    jobs = _jobs()
+    text = PIPELINE.read_text()
     assert "--subproject" in text and "ghtools ci setup" in text
-    assert doc["jobs"]["test"]["if"] == "inputs.tests"
-    assert (
-        "inputs.gates"
-        in next(s for s in doc["jobs"]["test"]["steps"] if s.get("name") == "Gates")["if"]
-    )
-    assert "matrix.subproject" in doc["jobs"]["test"]["name"]
-    agg = doc["jobs"]["tests-passed"]
+    assert "matrix.subproject" in jobs["test"]["name"]
+    agg = jobs["tests-passed"]
     assert "always()" in agg["if"]
     assert agg["permissions"] == {}
     assert "skipped" in agg["steps"][0]["run"]  # zero selected legs must pass
@@ -241,21 +236,14 @@ def test_subproject_legs_and_tests_passed_job():
 
 def test_subproject_legs_have_distinct_status_artifacts():
     # Every subproject leg shares one python and runner; upload-artifact rejects duplicate names.
-    ci = (ROOT / ".github/workflows/python-ci.yml").read_text()
-    assert "matrix.subproject && format(" in ci
-    assert (
-        '--subproject "$SUBPROJECT"' in ci.split("Record status leg")[1].split("upload-artifact")[0]
-    )
+    text = PIPELINE.read_text()
+    assert "matrix.subproject && format(" in text
+    assert '--subproject "$SUBPROJECT"' in _step("test", "Record status leg")["run"]
 
 
 def test_subproject_setup_runs_after_install():
     # Review D-I4: python-dev's setup (FreeImage, Playwright browser) imports the package.
-    names = [
-        s.get("name")
-        for s in yaml.safe_load((ROOT / ".github/workflows/python-ci.yml").read_text())["jobs"][
-            "test"
-        ]["steps"]
-    ]
+    names = [s.get("name") for s in _jobs()["test"]["steps"]]
     assert names.index("Setup (subproject)") > names.index("Install")
 
 
@@ -327,3 +315,14 @@ def test_forced_ci_selects_every_subproject_and_no_dead_outputs():
     step = next(s for s in config_job["steps"] if s.get("id") == "matrix")
     assert "FORCE_CI" in step["env"] and "--all" in step["run"]
     assert "force-ci" not in config_job["outputs"]  # only the step output is used
+
+
+def test_pipeline_calls_no_nested_reusable_workflows():
+    # A job-level `$/.github/workflows/...` inside the called pipeline resolves against the CALLER's
+    # repository on push and workflow_dispatch (measured 2026-09-28: startup_failure "workflow was not
+    # found"; pull_request worked), so every job runs inline. Step-level `$/` actions do work.
+    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    nested = {name: job["uses"] for name, job in doc["jobs"].items() if "uses" in job}
+    assert nested == {}
+    for gone in ("python-ci", "hacs-ci", "lint-ci", "docs", "release", "status"):
+        assert not (ROOT / ".github/workflows" / f"{gone}.yml").exists(), gone
