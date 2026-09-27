@@ -6,6 +6,23 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-27
+
+### Features
+
+- **readme**: port the rST-to-Markdown converter, stricter and with alerts and numbered lists
+- **readme**: named README blocks from a single source, with sync --check/--write and a gate
+- **readme**: init migrates SYNC markers to ghtools:sync blocks
+
+### Bug fixes
+
+- **readme**: fail loudly on rST outside the subset instead of dropping or mangling it
+- **readme**: clear errors for missing files, bounded heading offsets, every SYNC block detected
+
+### Documentation
+
+- **readme**: list the status and readme sync commands
+
 ## [0.2.0] - 2026-09-27
 
 ### Features
