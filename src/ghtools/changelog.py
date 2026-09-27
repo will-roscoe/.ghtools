@@ -168,6 +168,8 @@ def finalize_changelog(
     """
     crlf = "\r\n" in text
     work = text.replace("\r\n", "\n") if crlf else text
+    if re.search(rf"^## \[{re.escape(version)}\]", work, re.M):
+        return text, False  # already finalized (a retried release): never add a second section
     new_text, changed = _finalize_lf(work, version, release_date, commit_subjects)
     if not changed:
         return text, False

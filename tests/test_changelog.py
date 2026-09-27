@@ -255,3 +255,9 @@ def test_release_section_extracts_body_without_link_definitions():
     assert release_section(text, "1.2.0") == "### Features\n\n- a"
     assert release_section(text, "v1.2.0") == "### Features\n\n- a"
     assert release_section(text, "9.9.9") == ""
+
+
+def test_already_finalized_version_is_left_alone():
+    # A retried release must not add a second "## [1.1.0]" section (review I4).
+    text = "# Changelog\n\n## [Unreleased]\n\n## [1.1.0] - 2026-09-20\n\n### Features\n\n- a\n"
+    assert finalize_changelog(text, "1.1.0", date(2026, 9, 27), ["feat: b"]) == (text, False)
