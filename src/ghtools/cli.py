@@ -250,14 +250,14 @@ def _cmd_ci_install(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
-    return _run_checked(ci.install_command(_config.load(root)), root, "install")
+    return _run_checked(ci.install_command(_config.load(root), args.subproject), root, "install")
 
 
 def _cmd_ci_test(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
-    return _run_checked(ci.test_command(_config.load(root)), root, "tests")
+    return _run_checked(ci.test_command(_config.load(root), args.subproject), root, "tests")
 
 
 def _cmd_ci_should_run(args: Any) -> int:
@@ -265,6 +265,18 @@ def _cmd_ci_should_run(args: Any) -> int:
 
     root = repo_dir(args)
     print("true" if ci.should_run(_config.load(root), root, args.base) else "false")
+    return 0
+
+
+def _cmd_ci_setup(args: Any) -> int:
+    from . import ci
+
+    root = repo_dir(args)
+    for command in ci.setup_commands(_config.load(root), args.subproject):
+        proc = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root)
+        if proc.returncode != 0:
+            prefix = "::warning::" if os.environ.get("GITHUB_ACTIONS") == "true" else ""
+            print(f"{prefix}setup command failed (exit {proc.returncode}): {command}", flush=True)
     return 0
 
 
@@ -286,8 +298,15 @@ def _cmd_ci_matrix(args: Any) -> int:
 def _ci_commands(sub: Any) -> None:
     p = sub.add_parser("ci", help="CI test-job steps")
     cs = p.add_subparsers(dest="ci_cmd", required=True, metavar="<subcommand>")
-    cs.add_parser("install", help="pip install ci.install").set_defaults(handler=_cmd_ci_install)
-    cs.add_parser("test", help="run ci.test with coverage/junit").set_defaults(handler=_cmd_ci_test)
+    ins = cs.add_parser("install", help="pip install ci.install (or a subproject's install)")
+    ins.add_argument("--subproject", default=None)
+    ins.set_defaults(handler=_cmd_ci_install)
+    tst = cs.add_parser("test", help="run ci.test (or a subproject's tests) with coverage/junit")
+    tst.add_argument("--subproject", default=None)
+    tst.set_defaults(handler=_cmd_ci_test)
+    stp = cs.add_parser("setup", help="run a subproject's setup commands (failures warn)")
+    stp.add_argument("--subproject", required=True)
+    stp.set_defaults(handler=_cmd_ci_setup)
     s = cs.add_parser("should-run", help="does a push since BASE touch ci.paths? (true/false)")
     s.add_argument("--base", default="")
     s.set_defaults(handler=_cmd_ci_should_run)
