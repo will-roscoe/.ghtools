@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
+from .config import Config
 from .errors import GhtoolsError
+from .status.publish import repo_slug, status_url
 
 
 class ReadmeError(GhtoolsError):
@@ -121,3 +124,69 @@ def rst_to_markdown(rst: str, heading_offset: int = 0, source: str = "<rst>") ->
     while out and out[-1] == "":
         out.pop()
     return "\n".join(out) + "\n"
+
+
+def markers(name: str, source: str) -> tuple[str, str]:
+    return (
+        f"<!-- ghtools:sync {name} START — generated from {source}, do not edit here -->",
+        f"<!-- ghtools:sync {name} END -->",
+    )
+
+
+def _content(block: dict, root: Path, cfg: Config) -> tuple[str, str]:
+    if block["kind"] == "status":
+        slug = repo_slug(root)
+        if not slug:
+            raise ReadmeError(f"{block['name']}: the status block needs a GitHub 'origin' remote")
+        url = status_url(slug, cfg.get("status.branch"), "status.svg")
+        return "the status branch", f'<img src="{url}" alt="{slug} status" width="900">\n'
+    path = root / block["source"]
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".rst":
+        return block["source"], rst_to_markdown(text, block["heading-offset"], block["source"])
+    return block["source"], text.replace("\r\n", "\n").rstrip("\n") + "\n"
+
+
+def render_block(block: dict, root: Path, cfg: Config) -> str:
+    source, body = _content(block, Path(root), cfg)
+    start, end = markers(block["name"], source)
+    return f"{start}\n\n{body}\n{end}"
+
+
+def _span(text: str, name: str) -> tuple[int, int]:
+    starts = [
+        m.start()
+        for m in re.finditer(rf"<!-- ghtools:sync {re.escape(name)} START\b[^\n]*-->", text)
+    ]
+    ends = [m.end() for m in re.finditer(rf"<!-- ghtools:sync {re.escape(name)} END -->", text)]
+    if not starts and not ends:
+        start, end = markers(name, "<source>")
+        raise ReadmeError(
+            f"README.md has no ghtools:sync {name} markers; "
+            f"add these where the block goes:\n{start}\n{end}"
+        )
+    if len(starts) != 1:
+        raise ReadmeError(f"{name}: {len(starts)} START markers (need exactly one)")
+    if len(ends) != 1:
+        raise ReadmeError(f"{name}: {len(ends)} END markers (need exactly one)")
+    if ends[0] < starts[0]:
+        raise ReadmeError(f"{name}: END marker before START")
+    return starts[0], ends[0]
+
+
+def sync(root: Path, cfg: Config, write: bool) -> list[str]:
+    root = Path(root)
+    path = root / "README.md"
+    raw = path.read_bytes().decode("utf-8")
+    crlf = "\r\n" in raw
+    text = raw.replace("\r\n", "\n")
+    changed: list[str] = []
+    for block in cfg.get("readme.block"):
+        start, end = _span(text, block["name"])
+        new = render_block(block, root, cfg)
+        if text[start:end] != new:
+            changed.append(block["name"])
+            text = text[:start] + new + text[end:]
+    if write and changed:
+        path.write_bytes((text.replace("\n", "\r\n") if crlf else text).encode("utf-8"))
+    return changed

@@ -549,6 +549,31 @@ def _status_commands(sub: Any) -> None:
     url.set_defaults(handler=_cmd_status_url)
 
 
+def _cmd_readme_sync(args: Any) -> int:
+    from . import readme
+    from .errors import CheckFailed
+
+    root = repo_dir(args)
+    changed = readme.sync(root, _config.load(root), write=args.write)
+    if args.check and changed:
+        raise CheckFailed(
+            f"README blocks out of date: {', '.join(changed)} (run: ghtools readme sync --write)"
+        )
+    print(f"updated: {', '.join(changed)}" if changed and args.write else "README blocks in sync")
+    return 0
+
+
+@registrar
+def _readme_commands(sub: Any) -> None:
+    p = sub.add_parser("readme", help="README blocks generated from a single source")
+    rs = p.add_subparsers(dest="readme_cmd", required=True, metavar="<subcommand>")
+    s = rs.add_parser("sync", help="check or regenerate README blocks")
+    mode = s.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--write", action="store_true")
+    s.set_defaults(handler=_cmd_readme_sync)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
