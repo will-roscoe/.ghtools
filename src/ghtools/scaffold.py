@@ -25,6 +25,8 @@ from .templates import render
 
 STUB_VERSION = 1
 STUB_REF = "v1"
+# One line per stub contract version, used in `ghtools sync` pull requests.
+STUB_CHANGES = {1: "first version of the ghtools workflow stub"}
 
 # What ghtools now does for a workflow that contains one of these (checked in order).
 _REPLACED: list[tuple[str, str]] = [
@@ -93,7 +95,14 @@ def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str,
 
 
 def render_stub(branch: str, pypi: bool, ref: str = STUB_REF, dispatch: bool = False) -> str:
-    return render("stub.yml.j2", branch=branch, pypi=pypi, ref=ref, dispatch=dispatch)
+    return render(
+        "stub.yml.j2",
+        branch=branch,
+        pypi=pypi,
+        ref=ref,
+        dispatch=dispatch,
+        stub_version=STUB_VERSION,  # read at call time, so the marker always follows the constant
+    )
 
 
 BADGE_MAP = {
@@ -184,13 +193,40 @@ def _tests_importing(root: Path, modules: list[str]) -> list[tuple[str, str]]:
     return found
 
 
-@dataclass
-class Plan:
-    write: dict[str, str] = field(default_factory=dict)
-    remove: list[str] = field(default_factory=list)
-    keep: dict[str, str] = field(default_factory=dict)
-    archive: bool = False
-    notes: list[str] = field(default_factory=list)
+# Generic community files, rendered with the repo slug; `init --community` adds the missing ones.
+COMMUNITY = {
+    "community/ISSUE_TEMPLATE/bug_report.yml.j2": ".github/ISSUE_TEMPLATE/bug_report.yml",
+    "community/ISSUE_TEMPLATE/feature_request.yml.j2": ".github/ISSUE_TEMPLATE/feature_request.yml",
+    "community/ISSUE_TEMPLATE/config.yml.j2": ".github/ISSUE_TEMPLATE/config.yml",
+    "community/PULL_REQUEST_TEMPLATE.md.j2": ".github/PULL_REQUEST_TEMPLATE.md",
+    "community/CONTRIBUTING.md.j2": "CONTRIBUTING.md",
+    "community/SECURITY.md.j2": "SECURITY.md",
+}
+
+
+# These link to github.com/<owner>/<repo>, so they need a known GitHub slug.
+_NEEDS_SLUG = {"SECURITY.md", ".github/ISSUE_TEMPLATE/config.yml"}
+
+
+def community_files(
+    root: Path, docs_url: str, releases: bool = True, slug: str | None = None
+) -> dict[str, str]:
+    """The community files `root` doesn't have yet (never overwrites), rendered for this repo.
+
+    Without a GitHub slug, the files that link to the repository on GitHub are skipped."""
+    root = Path(root)
+    slug = slug or (repo_slug(root) if root.is_dir() else None)
+    values = {
+        "repo": slug or "",
+        "name": (slug or root.name).split("/")[-1],
+        "docs_url": docs_url,
+        "releases": releases,
+    }
+    return {
+        dest: render(tpl, **values)
+        for tpl, dest in COMMUNITY.items()
+        if not (root / dest).exists() and (slug or dest not in _NEEDS_SLUG)
+    }
 
 
 def _apply_answers(d: Detection, answers: dict[str, str]) -> None:
@@ -225,8 +261,41 @@ def _nested(values: dict[str, Any]) -> dict[str, Any]:
     return tree
 
 
+@dataclass
+class Plan:
+    write: dict[str, str] = field(default_factory=dict)
+    remove: list[str] = field(default_factory=list)
+    keep: dict[str, str] = field(default_factory=dict)
+    archive: bool = False
+    notes: list[str] = field(default_factory=list)
+
+
+def _community_plan(root: Path, cfg: Any, notes: list[str]) -> dict[str, str]:
+    slug = repo_slug(root)
+    owner, _, name = (slug or "").partition("/")
+    docs_url = f"https://{owner}.github.io/{name}" if cfg.get("docs.pages") and name else ""
+    files = community_files(root, docs_url, releases=cfg.get("release.enabled"), slug=slug)
+    if not slug:
+        notes.append(
+            "community: no GitHub 'origin' remote, so SECURITY.md and the issue-form contact "
+            "links were skipped; add the remote and re-run `ghtools init --community`"
+        )
+    elif "SECURITY.md" in files:
+        notes.append(
+            "community: SECURITY.md sends reports to GitHub private vulnerability reporting, "
+            "which is off by default; turn it on: "
+            f"gh api -X PUT repos/{slug}/private-vulnerability-reporting"
+        )
+    return files
+
+
 def make_plan(
-    root: Path, answers: dict[str, str], keep_old: bool, archive_mode: str, ref: str
+    root: Path,
+    answers: dict[str, str],
+    keep_old: bool,
+    archive_mode: str,
+    ref: str,
+    community: bool = False,
 ) -> tuple[Plan, Detection]:
     d = detect(root)
     _apply_answers(d, answers)
@@ -302,6 +371,8 @@ def make_plan(
             "subprojects: set needs = [...] on any subproject that imports another, so a change "
             "to the one it imports also tests it (detection can't see imports)"
         )
+    if community:
+        plan.write.update(_community_plan(root, cfg, plan.notes))
     if pypi:
         plan.notes.append(
             "PyPI: change this project's trusted publisher to workflow `ghtools.yml`, "
@@ -336,6 +407,7 @@ def init_repo(
     ask: Callable[[str], str] = input,
     out: Callable[[str], None] = print,
     today: str | None = None,
+    community: bool = False,
 ) -> int:
     root = Path(root).resolve()
     if not is_work_tree_root(root):
@@ -345,7 +417,7 @@ def init_repo(
     existing = root / CONFIG_PATH
     first = detect(root)
     answers = _ask_questions(first, yes, ask, out)
-    plan, d = make_plan(root, answers, keep_old, archive_mode, ref)
+    plan, d = make_plan(root, answers, keep_old, archive_mode, ref, community)
 
     if existing.is_file():  # re-run: compare, write only the settings file and only with --write
         current = existing.read_text(encoding="utf-8")
@@ -366,6 +438,17 @@ def init_repo(
                 )
             existing.write_text(proposed, encoding="utf-8")
             out(f"wrote {CONFIG_PATH}")
+        if community:  # a re-run can still add the community files that are missing
+            notes: list[str] = []
+            settings = from_dict(tomllib.loads(existing.read_text(encoding="utf-8")))
+            files = _community_plan(root, settings, notes)
+            for note in notes:
+                out(f"NOTE: {note}")
+            for rel, text in files.items():
+                out(f"  + {rel}")
+                if not dry_run:
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(text, encoding="utf-8")
         return 0
 
     out("Detected:")
@@ -505,10 +588,15 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         base = root / archive.ARCHIVE_DIR
         if base.exists() and not any(base.iterdir()):
             base.rmdir()
-    else:
+    elif targets:  # a repo with no .github before init has nothing to restore
         git("checkout", "pre-ghtools", "--", ".github", cwd=root)
     for rel in ours:
         (root / rel).unlink()
     out("ghtools removed.")
+    if any((root / dest).exists() for dest in COMMUNITY.values()):
+        out(
+            "deinit leaves the community files (issue forms, PR template, CONTRIBUTING, SECURITY); "
+            "delete them by hand if unwanted"
+        )
     out("If a ghtools-status branch exists: git push origin --delete ghtools-status")
     return 0

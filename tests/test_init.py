@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from pathlib import Path
 
 import pytest
 import yaml
@@ -373,3 +374,65 @@ def test_init_names_tests_that_import_a_removed_script(git_repo):
     notes = [n for n in plan.notes if "tests/unit/test_resolve_directives.py" in n]
     assert notes and "resolve_directives" in notes[0]
     assert not any("test_other.py" in n for n in plan.notes)
+
+
+def test_community_files_fill_the_slug_and_skip_existing(git_repo):
+    git_repo.commit("feat: a", {".github/ISSUE_TEMPLATE/bug_report.yml": "name: mine\n"})
+    git_repo.run("remote", "add", "origin", "git@github.com:will-roscoe/intercom.git")
+    assert scaffold.repo_slug(git_repo.path) == "will-roscoe/intercom"
+    files = scaffold.community_files(git_repo.path, docs_url="")
+    assert ".github/ISSUE_TEMPLATE/bug_report.yml" not in files
+    assert "will-roscoe/intercom/security/advisories/new" in files["SECURITY.md"]
+    assert (
+        "will-roscoe/intercom/security/advisories/new" in files[".github/ISSUE_TEMPLATE/config.yml"]
+    )
+    assert "Documentation" not in files[".github/ISSUE_TEMPLATE/config.yml"]
+    assert "@" not in files["SECURITY.md"].replace("github.com", "")  # no email addresses
+
+
+def test_init_community_writes_them_and_deinit_leaves_them(git_repo):
+    git_repo.commit("feat: a", {"pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n'})
+    git_repo.run("tag", "pre-ghtools")  # no .github to snapshot, so deinit restores from the tag
+    git_repo.run("remote", "add", "origin", "https://github.com/o/r.git")  # SECURITY.md needs it
+    scaffold.init_repo(git_repo.path, yes=True, community=True, out=lambda s: None)
+    assert (git_repo.path / "SECURITY.md").is_file()
+    git_repo.run("add", "-A")
+    git_repo.run("commit", "-q", "-m", "ci: ghtools")
+    lines = []
+    scaffold.deinit_repo(git_repo.path, out=lines.append)
+    assert (git_repo.path / "SECURITY.md").is_file()
+    assert any("leaves the community files" in line for line in lines)
+
+
+def test_community_yaml_is_valid():
+    files = scaffold.community_files(Path("/nonexistent"), docs_url="https://o.github.io/r")
+    for rel, text in files.items():
+        if rel.endswith(".yml"):
+            assert isinstance(yaml.safe_load(text), dict), rel
+
+
+@pytest.mark.parametrize("releases", [True, False])
+def test_contributing_fits_the_repo(tmp_path, releases):
+    # Review E-I4: HACS and lint repos have no `pip install -e .[dev]`; some repos don't release.
+    text = scaffold.community_files(tmp_path, docs_url="", releases=releases, slug="o/r")[
+        "CONTRIBUTING.md"
+    ]
+    assert "pip install" not in text
+    assert ("+:major" in text) is releases
+
+
+def test_community_notes_private_vulnerability_reporting(git_repo):
+    # Review E-I5: SECURITY.md points at private vulnerability reporting, which is off by default.
+    git_repo.commit("feat: a", {"pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n'})
+    git_repo.run("remote", "add", "origin", "https://github.com/o/r.git")
+    plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1", community=True)
+    assert any("private vulnerability reporting" in n and "o/r" in n for n in plan.notes)
+
+
+def test_no_github_remote_skips_link_bearing_community_files(git_repo):
+    # Review E-M1: without a GitHub remote the links pointed at github.com/<directory name>.
+    git_repo.commit("feat: a", {"pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n'})
+    plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1", community=True)
+    assert "SECURITY.md" not in plan.write and ".github/ISSUE_TEMPLATE/config.yml" not in plan.write
+    assert "CONTRIBUTING.md" in plan.write
+    assert any("no GitHub 'origin'" in n for n in plan.notes)
