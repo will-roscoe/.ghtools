@@ -13,6 +13,7 @@ from typing import Any
 from .ci import STUB_PATH
 from .config import Config, load
 from .errors import ConfigError
+from .gitutil import submodules
 
 GhJson = Callable[[list[str]], Any]
 _BLOCKING_RULES = {"pull_request", "update", "required_status_checks"}
@@ -95,11 +96,11 @@ def _subproject_findings(cfg: Config, root: Path) -> list[Finding]:
                     f"add{yaml}",
                 )
             )
-    submodules = set(re.findall(r"^\s*path\s*=\s*(\S+)", _read(root / ".gitmodules"), re.M))
+    module_paths = {path for path, _ in submodules(root)}
     for git_dir in sorted(root.glob("*/.git")):
         rel = git_dir.parent.relative_to(root).as_posix()
         ignored = subprocess.run(["git", "check-ignore", "-q", rel], cwd=root).returncode == 0
-        if rel not in submodules and not ignored:
+        if rel not in module_paths and not ignored:
             out.append(
                 Finding(
                     "warn", f"{rel} is a nested git repo that is neither a submodule nor gitignored"

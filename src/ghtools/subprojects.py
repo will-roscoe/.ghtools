@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from .config import Config, export, in_tree
+from .gitutil import submodules
 
 GLOBAL = (".github/ghtools.toml", ".github/workflows/ghtools.yml", "pyproject.toml", "codecov.yml")
 
@@ -66,28 +66,12 @@ def matrix(cfg: Config, root: Path, base: str, head: str) -> tuple[dict[str, Any
     return {"include": include}, True
 
 
-def _gitmodules(root: Path) -> list[tuple[str, str]]:
-    """(path, url) per submodule; git writes path before url, but accept either order."""
-    text = (
-        (root / ".gitmodules").read_text(encoding="utf-8")
-        if (root / ".gitmodules").is_file()
-        else ""
-    )
-    out: list[tuple[str, str]] = []
-    for section in re.split(r"^\[submodule [^\]]*\]\s*$", text, flags=re.M)[1:]:
-        path = re.search(r"^\s*path\s*=\s*(\S+)", section, re.M)
-        url = re.search(r"^\s*url\s*=\s*(\S+)", section, re.M)
-        if path and url:
-            out.append((path.group(1), url.group(1)))
-    return out
-
-
 def submodule_status(root: Path) -> list[dict[str, str]]:
     """Each submodule's recorded pointer against its remote's HEAD (never prompts, 15 s cap)."""
     root = Path(root)
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
     rows: list[dict[str, str]] = []
-    for path, url in _gitmodules(root):
+    for path, url in submodules(root):
         tree = subprocess.run(
             ["git", "ls-tree", "HEAD", path], cwd=root, capture_output=True, text=True
         )

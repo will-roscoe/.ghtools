@@ -140,3 +140,24 @@ def changed_files(base: str, cwd: Path | str = ".") -> list[str] | None:
 def tracked_files(patterns: Iterable[str], cwd: Path | str = ".") -> list[str]:
     out = git("ls-files", "--", *patterns, cwd=cwd)
     return sorted(line for line in out.splitlines() if line)
+
+
+def submodules(cwd: Path | str = ".") -> list[tuple[str, str]]:
+    """(path, url) for each submodule in .gitmodules, parsed by git (comments ignored)."""
+    if not (Path(cwd) / ".gitmodules").is_file():
+        return []
+    listing = git(
+        "config",
+        "-f",
+        ".gitmodules",
+        "--get-regexp",
+        r"^submodule\..*\.(path|url)$",
+        cwd=cwd,
+        check=False,
+    )
+    found: dict[str, dict[str, str]] = {}
+    for line in listing.splitlines():
+        key, _, value = line.partition(" ")
+        name, _, field = key.removeprefix("submodule.").rpartition(".")
+        found.setdefault(name, {})[field] = value
+    return [(f["path"], f.get("url", "")) for f in found.values() if "path" in f]

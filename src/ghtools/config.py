@@ -300,6 +300,14 @@ def _check_subprojects(cfg: Config) -> None:
     rows = cfg.get("subprojects")
     names: list[str] = []
     for i, row in enumerate(rows):
+        path = row["path"].strip().removeprefix("./").rstrip("/")
+        parts = path.split("/")
+        if not path or path.startswith("/") or ".." in parts:
+            raise ConfigError(
+                f"subprojects[{i}].path: {row['path']!r} must be a relative path "
+                "inside the repository"
+            )
+        row["path"] = path  # "./c/" and "c" must select the same files
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", row["name"]):
             raise ConfigError(
                 f"subprojects[{i}].name: {row['name']!r} must match [a-z0-9][a-z0-9_-]*"

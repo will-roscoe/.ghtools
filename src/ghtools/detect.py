@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .gitutil import current_branch, default_branch, release_tags, tracked_files
+from .gitutil import current_branch, default_branch, release_tags, submodules, tracked_files
 
 
 @dataclass
@@ -65,11 +65,19 @@ def _branch(root: Path, d: Detection) -> None:
         d.set("branch", current_branch(root) or "main", "current branch (no origin/HEAD)")
 
 
+def _has_project_table(pyproject: str) -> bool:
+    """Parsed, not substring-matched: a comment saying "no [project]" is not a package."""
+    try:
+        return "project" in tomllib.loads(pyproject)
+    except tomllib.TOMLDecodeError:
+        return False
+
+
 def _profile(root: Path, pyproject: str, d: Detection) -> list[Path]:
     manifests = sorted(root.glob("custom_components/*/manifest.json"))
     if manifests and (root / "hacs.json").is_file():
         d.set("profile", "hacs", "custom_components/*/manifest.json + hacs.json")
-    elif (pyproject and "[project]" in pyproject) or (root / "setup.py").is_file():
+    elif _has_project_table(pyproject) or (root / "setup.py").is_file():
         d.set("profile", "python", "pyproject.toml [project]" if pyproject else "setup.py")
     elif (root / ".gitmodules").is_file():
         d.set("profile", "umbrella", ".gitmodules with no root package")
@@ -234,9 +242,13 @@ def _readme(root: Path, d: Detection) -> None:
 
 def _subprojects(root: Path, d: Detection) -> None:
     rows: list[dict[str, Any]] = []
+    modules = submodules(root)
+    module_paths = {path for path, _ in modules}
     for sub in sorted(root.iterdir()):
         pyproject = sub / "pyproject.toml"
         if not sub.is_dir() or sub.name.startswith(".") or not pyproject.is_file():
+            continue
+        if sub.name in module_paths:  # a checked-out submodule: listed below, not built here
             continue
         try:
             name = (
@@ -263,7 +275,7 @@ def _subprojects(root: Path, d: Detection) -> None:
         if (sub / "tests").is_dir():
             row["tests"] = f"{sub.name}/tests"
         rows.append(row)
-    for path in re.findall(r"path\s*=\s*(\S+)", _read(root / ".gitmodules")):
+    for path, _url in modules:
         rows.append(
             {"name": Path(path).name.lower().replace("-", "_"), "path": path, "kind": "submodule"}
         )
@@ -271,6 +283,7 @@ def _subprojects(root: Path, d: Detection) -> None:
         d.set("subprojects", rows, "nested pyproject.toml projects and .gitmodules")
     if any(r.get("kind") != "submodule" for r in rows):
         d.set("ci.coverage.flags", "subproject", "one Codecov flag per in-tree subproject")
+        d.set("status.rows", ["python", "builds", "subprojects"], "in-tree subprojects")
 
 
 def detect(root: Path) -> Detection:

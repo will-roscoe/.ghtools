@@ -292,3 +292,14 @@ def test_check_paths_covers_subprojects(tmp_path):
     cfg = config.from_dict({"subprojects": [{"name": "a", "path": "a"}]})
     with pytest.raises(ConfigError, match=r"subprojects\[0\]\.path: a does not exist"):
         config.check_paths(cfg, tmp_path)
+
+
+def test_subproject_paths_are_normalised_and_confined():
+    cfg = config.from_dict({"subprojects": [{"name": "c", "path": "./c/"}]})
+    assert cfg.get("subprojects")[0]["path"] == "c"
+    for bad in ("/abs", "../up", "a/../../b"):
+        with pytest.raises(
+            ConfigError,
+            match=r"subprojects\[0\]\.path: .* must be a relative path inside the repository",
+        ):
+            config.from_dict({"subprojects": [{"name": "c", "path": bad}]})

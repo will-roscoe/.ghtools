@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from ghtools.detect import detect
 
 PROTONFS_PYPROJECT = """\
@@ -272,3 +274,62 @@ def test_python_dev_like_subprojects(git_repo):
     assert rows["devlib"]["package"] == "devlib"
     assert rows["coordpy"] == {"name": "coordpy", "path": "coordpy", "kind": "submodule"}
     assert detect(git_repo.path).values["ci.coverage.flags"] == "subproject"
+
+
+def test_checked_out_submodule_is_not_also_an_in_tree_project(git_repo, tmp_path):
+    # Review D-C1: python-dev/iot-dev/sph-dev all failed init with "duplicate subproject".
+    upstream = tmp_path / "up"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(upstream)], check=True)
+    (upstream / "pyproject.toml").write_text('[project]\nname = "eqrel"\n')
+    subprocess.run(["git", "-C", str(upstream), "add", "-A"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(upstream),
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            "one",
+        ],
+        check=True,
+    )
+    git_repo.commit(
+        "feat: a",
+        {"pyproject.toml": "[tool.ruff]\n", "a/pyproject.toml": '[project]\nname = "a"\n'},
+    )
+    git_repo.run(
+        "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(upstream), "eqrel"
+    )
+    with (git_repo.path / ".gitmodules").open("a") as f:
+        f.write('#[submodule "old"]\n#\tpath = old\n#\turl = x\n')
+    git_repo.run("commit", "-q", "-am", "chore(eqrel): add")
+    rows = detect(git_repo.path).values["subprojects"]
+    assert sorted((r["name"], r.get("kind", "in-tree")) for r in rows) == [
+        ("a", "in-tree"),
+        ("eqrel", "submodule"),
+    ]
+
+
+def test_a_comment_mentioning_project_is_not_a_package(git_repo):
+    # Review D-C2: python-dev's pyproject says "Intentionally NOT an installable package: no [project]".
+    git_repo.commit(
+        "feat: a",
+        {
+            "pyproject.toml": "# Intentionally NOT an installable package: no [project]\n[tool.ruff]\n",
+            ".gitmodules": '[submodule "c"]\n\tpath = c\n\turl = https://example.invalid/c.git\n',
+        },
+    )
+    assert detect(git_repo.path).values["profile"] == "umbrella"
+
+
+def test_subprojects_row_is_on_when_in_tree_subprojects_exist(git_repo):
+    git_repo.commit(
+        "feat: a",
+        {"pyproject.toml": "[tool.ruff]\n", "a/pyproject.toml": '[project]\nname = "a"\n'},
+    )
+    assert "subprojects" in detect(git_repo.path).values["status.rows"]
