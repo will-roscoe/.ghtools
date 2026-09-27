@@ -357,7 +357,10 @@ jobs:
 
   docs-deploy:
     needs: [config, docs]
+    # always(): the profile-specific CI jobs upstream of docs are always partly skipped, and a
+    # skipped ancestor would otherwise skip this job too.
     if: >-
+      always() && needs.docs.result == 'success' &&
       needs.config.outputs.default-ref == 'true' &&
       fromJSON(needs.config.outputs.config).docs.pages && !inputs.dry-run
     runs-on: ubuntu-latest

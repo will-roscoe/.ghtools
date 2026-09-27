@@ -326,3 +326,24 @@ def test_pipeline_calls_no_nested_reusable_workflows():
     assert nested == {}
     for gone in ("python-ci", "hacs-ci", "lint-ci", "docs", "release", "status"):
         assert not (ROOT / ".github/workflows" / f"{gone}.yml").exists(), gone
+
+
+def test_jobs_downstream_of_conditional_jobs_do_not_inherit_their_skips():
+    # GitHub skips a job whenever something in its needs chain was skipped, unless its `if` uses a
+    # status function. After flattening, the profile-specific CI jobs are always partly skipped, so
+    # docs-deploy never ran (ios2ha-camera, 2026-09-28) until it said always().
+    jobs = _jobs()
+
+    def ancestors(name, seen=None):
+        seen = set() if seen is None else seen
+        needs = jobs[name].get("needs", [])
+        for need in [needs] if isinstance(needs, str) else needs:
+            if need not in seen:
+                seen.add(need)
+                ancestors(need, seen)
+        return seen
+
+    for name, job in jobs.items():
+        conditional = [a for a in ancestors(name) if "if" in jobs[a]]
+        if conditional:
+            assert "always()" in str(job.get("if", "")), f"{name} inherits skips from {conditional}"
