@@ -197,6 +197,9 @@ def _walk(raw: dict[str, Any], path: str, out: dict[str, Any]) -> None:
 
 
 def _cross_checks(cfg: Config) -> None:
+    for key in ("ci.python", "ci.runners"):
+        if not cfg.get(key):
+            raise ConfigError(f"{key}: must not be empty")
     from .gates import BUILTIN  # local import: gates imports config in Task 8
 
     for gate in cfg.get("ci.gates"):
@@ -223,6 +226,22 @@ def _cross_checks(cfg: Config) -> None:
     is_pytest = words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]
     if cfg.get("ci.coverage.package") and not is_pytest:
         raise ConfigError("ci.coverage.package needs ci.test to run pytest")
+
+
+def check_paths(cfg: Config, root: Path) -> None:
+    """Checks that need the repository: every path the settings name must exist."""
+    root = Path(root)
+    source = cfg.get("version.source")
+    if source == "pyproject" and not (root / "pyproject.toml").is_file():
+        raise ConfigError("version.source = 'pyproject' but pyproject.toml does not exist")
+    manifest = cfg.get("version.manifest")
+    if source == "manifest" and not (root / manifest).is_file():
+        raise ConfigError(f"version.manifest: {manifest} does not exist")
+    zip_dir = cfg.get("release.zip")
+    if "github-zip" in cfg.get("release.publish") and not (root / zip_dir).is_dir():
+        raise ConfigError(f"release.zip: {zip_dir} is not a directory")
+    if cfg.get("docs.enabled") and not (root / cfg.get("docs.dir") / "conf.py").is_file():
+        raise ConfigError(f"docs.dir: {cfg.get('docs.dir')}/conf.py does not exist")
 
 
 def from_dict(raw: dict[str, Any]) -> Config:

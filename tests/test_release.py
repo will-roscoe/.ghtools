@@ -9,7 +9,7 @@ import pytest
 
 from ghtools import config, release
 from ghtools.cli import main
-from ghtools.errors import CheckFailed
+from ghtools.errors import CheckFailed, ConfigError
 
 CHANGELOG = "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n\n- first\n"
 
@@ -193,3 +193,10 @@ def test_cli_decide_resumes_via_gh_when_a_token_is_present(git_repo, tmp_path, m
     out.write_text("")
     main(["-C", str(git_repo.path), "release", "decide", "--github-output"])
     assert "resume=false" in out.read_text()  # no token: never guesses
+
+
+def test_build_refuses_a_missing_zip_directory(git_repo):
+    git_repo.commit("feat: a")
+    cfg = _cfg(profile="hacs", release={"publish": ["github-zip"], "zip": "custom_components/gone"})
+    with pytest.raises(ConfigError, match="not a directory"):
+        release.build(cfg, git_repo.path)

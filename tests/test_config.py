@@ -156,4 +156,46 @@ def test_default_install_is_editable_so_path_coverage_collects_data():
 
 
 def test_export_has_the_newest_python_for_single_version_jobs():
-    assert config.export(config.from_dict({"ci": {"python": ["3.13", "3.14"]}}))["python_latest"] == "3.14"
+    assert (
+        config.export(config.from_dict({"ci": {"python": ["3.13", "3.14"]}}))["python_latest"]
+        == "3.14"
+    )
+
+
+@pytest.mark.parametrize("key", ["python", "runners"])
+def test_empty_matrix_lists_are_rejected(key):
+    # Review I8: an empty list passed `config check` and crashed or emptied the matrix later.
+    with pytest.raises(ConfigError, match=rf"ci\.{key}: must not be empty"):
+        config.from_dict({"ci": {key: []}})
+
+
+def test_check_paths_names_missing_files(tmp_path):
+    cfg = config.from_dict(
+        {
+            "profile": "hacs",
+            "version": {"source": "manifest", "manifest": "custom_components/x/manifest.json"},
+            "release": {"publish": ["github-zip"], "zip": "custom_components/x"},
+        }
+    )
+    with pytest.raises(
+        ConfigError, match=r"version\.manifest: custom_components/x/manifest\.json does not exist"
+    ):
+        config.check_paths(cfg, tmp_path)
+    (tmp_path / "custom_components/x").mkdir(parents=True)
+    (tmp_path / "custom_components/x/manifest.json").write_text("{}")
+    config.check_paths(cfg, tmp_path)
+    (tmp_path / "custom_components/x/manifest.json").unlink()
+    (tmp_path / "custom_components/x").rmdir()
+    cfg2 = config.from_dict({"release": {"publish": ["github-zip"], "zip": "nope"}})
+    with pytest.raises(ConfigError, match=r"release\.zip: nope is not a directory"):
+        config.check_paths(cfg2, tmp_path)
+    cfg3 = config.from_dict({"docs": {"enabled": True, "dir": "docs"}})
+    with pytest.raises(ConfigError, match=r"docs\.dir: docs/conf\.py does not exist"):
+        config.check_paths(cfg3, tmp_path)
+
+
+def test_config_check_cli_checks_paths(tmp_path, capsys):
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/ghtools.toml").write_text('[version]\nsource = "pyproject"\n')
+    assert main(["-C", str(tmp_path), "config", "check"]) == 1
+    assert "pyproject.toml does not exist" in capsys.readouterr().err

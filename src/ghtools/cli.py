@@ -64,7 +64,8 @@ def _print_value(value: Any) -> None:
 
 
 def _cmd_config_check(args: Any) -> int:
-    _config.load(repo_dir(args))
+    root = repo_dir(args)
+    _config.check_paths(_config.load(root), root)
     print(f"{_config.CONFIG_PATH}: ok")
     return 0
 

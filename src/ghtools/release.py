@@ -12,8 +12,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .changelog import finalize_changelog, release_section
-from .config import Config
-from .errors import CheckFailed
+from .config import Config, check_paths
+from .errors import CheckFailed, ConfigError
 from .gitutil import git, latest_tag, log_messages, log_subjects, since_range, tag_exists
 from .version import compute_next_version
 from .versionfile import read_version, version_file, write_version
@@ -53,6 +53,7 @@ def decide(cfg: Config, root: Path, has_release: Callable[[str], bool] | None = 
     GitHub release yet (a run that failed after pushing the tag) is resumed, not skipped."""
     if not cfg.get("release.enabled"):
         return Decision(False, "", "", "", "release.enabled = false")
+    check_paths(cfg, root)
     current = latest_tag(root)
     if (
         current
@@ -135,5 +136,7 @@ def build(cfg: Config, root: Path, out: str = "dist") -> list[Path]:
         made += sorted(p for p in dist.iterdir() if p.suffix in {".whl", ".gz"})
     if "github-zip" in publish:
         src = root / cfg.get("release.zip")
+        if not src.is_dir():
+            raise ConfigError(f"release.zip: {cfg.get('release.zip')} is not a directory")
         made.append(_zip_dir(src, dist / f"{src.name}.zip"))
     return made
