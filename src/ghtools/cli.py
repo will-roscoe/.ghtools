@@ -343,6 +343,22 @@ def _deinit_commands(sub: Any) -> None:
     asub.add_parser("prune", help="delete .github/archive").set_defaults(handler=_cmd_archive_prune)
 
 
+def _cmd_doctor(args: Any) -> int:
+    from .doctor import run_checks
+
+    findings = run_checks(repo_dir(args))
+    icons = {"ok": "✓", "warn": "!", "fail": "✗"}
+    for finding in findings:
+        print(f"{icons[finding.level]} {finding.message}")
+    return 2 if any(f.level == "fail" for f in findings) else 0
+
+
+@registrar
+def _doctor_command(sub: Any) -> None:
+    p = sub.add_parser("doctor", help="check this repo's ghtools setup")
+    p.set_defaults(handler=_cmd_doctor)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ghtools", description="Shared GitHub tooling: CI, releases, docs and status."
