@@ -1,6 +1,11 @@
 name: ghtools hacs ci
 on:
   workflow_call:
+    inputs:
+      python:
+        description: Python version for lint and tests (the newest in ci.python)
+        type: string
+        default: "3.13"
 
 permissions: {}
 
@@ -14,7 +19,7 @@ jobs:
       - uses: $/.github/actions/setup-ghtools
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: ${{ inputs.python }}
       - run: |
           ghtools gates install --stage test
           ghtools gates run --stage test
@@ -28,7 +33,7 @@ jobs:
       - uses: $/.github/actions/setup-ghtools
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: ${{ inputs.python }}
       - run: ghtools ci install
       - run: ghtools ci test
 

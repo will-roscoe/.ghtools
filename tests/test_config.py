@@ -153,3 +153,7 @@ def test_default_install_is_editable_so_path_coverage_collects_data():
     # A non-editable install makes tests import from site-packages, so --cov=src/<pkg>
     # (a source path) records nothing: the first CI run of .ghtools hit exactly this.
     assert config.from_dict({}).get("ci.install") == "-e .[dev]"
+
+
+def test_export_has_the_newest_python_for_single_version_jobs():
+    assert config.export(config.from_dict({"ci": {"python": ["3.13", "3.14"]}}))["python_latest"] == "3.14"

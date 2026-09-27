@@ -94,6 +94,8 @@ jobs:
     permissions:
       contents: read
     uses: $/.github/workflows/hacs-ci.yml
+    with:
+      python: ${{ fromJSON(needs.config.outputs.config).python_latest }}
 
   ci-lint:
     needs: config

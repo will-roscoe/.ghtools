@@ -259,6 +259,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "profile": cfg.get("profile"),
         "branch": cfg.get("branch"),
         "matrix": {"include": include},
+        "python_latest": python[-1],
         "codecov": cfg.get("ci.coverage.codecov"),
         "flags": cfg.get("ci.coverage.flags"),
         "docker": cfg.get("ci.docker"),

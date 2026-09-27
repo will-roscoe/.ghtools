@@ -139,11 +139,26 @@ def test_tests_still_run_and_report_when_a_gate_fails():
 def test_ghtools_failures_are_never_swallowed(path):
     # `< <(cmd)` and `echo "...$(cmd)"` both discard cmd's exit status under set -e (review C1).
     for run in _runs(yaml.safe_load(path.read_text())):
-        assert not re.search(r"<\s*<\(\s*ghtools", run), f"{path.name}: process substitution of ghtools"
-        assert not re.search(r"echo\s+\"[^\"]*\$\(ghtools", run), f"{path.name}: ghtools inside echo"
+        assert not re.search(r"<\s*<\(\s*ghtools", run), (
+            f"{path.name}: process substitution of ghtools"
+        )
+        assert not re.search(r"echo\s+\"[^\"]*\$\(ghtools", run), (
+            f"{path.name}: ghtools inside echo"
+        )
 
 
 def test_config_job_can_see_a_pending_resume():
     doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
     step = next(s for s in doc["jobs"]["config"]["steps"] if s.get("id") == "decide")
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+
+
+def test_hacs_ci_uses_the_configured_python():
+    # Review I7: ios2ha-camera-hass needs 3.14; a hardcoded 3.13 breaks its install.
+    hacs = yaml.safe_load((ROOT / ".github/workflows/hacs-ci.yml").read_text())
+    assert hacs[True]["workflow_call"]["inputs"]["python"]["type"] == "string"
+    for job in ("lint", "test"):
+        setup = next(s for s in hacs["jobs"][job]["steps"] if "setup-python" in s.get("uses", ""))
+        assert setup["with"]["python-version"] == "${{ inputs.python }}"
+    pipeline = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    assert "python_latest" in pipeline["jobs"]["ci-hacs"]["with"]["python"]
