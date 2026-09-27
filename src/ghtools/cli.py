@@ -268,6 +268,20 @@ def _cmd_ci_should_run(args: Any) -> int:
     return 0
 
 
+def _cmd_ci_matrix(args: Any) -> int:
+    from .subprojects import matrix
+
+    root = repo_dir(args)
+    m, any_legs = matrix(_config.load(root), root, args.base, args.head)
+    if args.github_output:
+        write_github_output(
+            {"matrix": json.dumps(m, separators=(",", ":")), "any": str(any_legs).lower()}
+        )
+    else:
+        print(json.dumps({"matrix": m, "any": any_legs}, separators=(",", ":")))
+    return 0
+
+
 @registrar
 def _ci_commands(sub: Any) -> None:
     p = sub.add_parser("ci", help="CI test-job steps")
@@ -277,6 +291,11 @@ def _ci_commands(sub: Any) -> None:
     s = cs.add_parser("should-run", help="does a push since BASE touch ci.paths? (true/false)")
     s.add_argument("--base", default="")
     s.set_defaults(handler=_cmd_ci_should_run)
+    m = cs.add_parser("matrix", help="the CI matrix for this change, as one JSON line")
+    m.add_argument("--base", default="")
+    m.add_argument("--head", default="HEAD")
+    m.add_argument("--github-output", action="store_true")
+    m.set_defaults(handler=_cmd_ci_matrix)
 
 
 def _cmd_docs_install(args: Any) -> int:

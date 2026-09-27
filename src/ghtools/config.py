@@ -385,6 +385,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "docker": cfg.get("ci.docker"),
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
         "status": {"enabled": cfg.get("status.enabled")},
+        "subprojects": bool(in_tree(cfg)),
         "release": {
             "enabled": cfg.get("release.enabled"),
             "commit": cfg.get("release.commit"),
