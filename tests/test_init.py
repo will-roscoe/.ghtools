@@ -308,3 +308,16 @@ def test_init_migrates_old_sync_markers(git_repo):
     assert "SYNC:overview" not in text
     assert not (git_repo.path / ".github/scripts/sync_readme.py").exists()
     assert config.load(git_repo.path).get("readme.block")[0]["name"] == "overview"
+
+
+def test_init_notes_needs_for_several_subprojects(git_repo):
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": "[tool.ruff]\n",
+            "a/pyproject.toml": '[project]\nname = "a"\n',
+            "b/pyproject.toml": '[project]\nname = "b"\n',
+        },
+    )
+    plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1")
+    assert any("needs = [" in note for note in plan.notes)

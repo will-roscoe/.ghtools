@@ -251,6 +251,12 @@ def make_plan(
     migrated = migrate_sync_markers(readme_text) if readme_text else ""
     if migrated and migrated != readme_text:
         plan.write["README.md"] = migrated
+    in_tree = [s for s in cfg.get("subprojects") if s["kind"] == "in-tree"]
+    if len(in_tree) > 1:
+        plan.notes.append(
+            "subprojects: set needs = [...] on any subproject that imports another, so a change "
+            "to the one it imports also tests it (detection can't see imports)"
+        )
     if pypi:
         plan.notes.append(
             "PyPI: change this project's trusted publisher to workflow `ghtools.yml`, "

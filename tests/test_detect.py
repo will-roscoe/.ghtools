@@ -243,3 +243,32 @@ def test_every_sync_block_is_detected(git_repo):
     )
     blocks = detect(git_repo.path).values["readme.block"]
     assert [b["name"] for b in blocks] == ["a", "b"]
+
+
+def test_python_dev_like_subprojects(git_repo):
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": "[tool.ruff]\nline-length = 100\n",
+            "scrapetool/pyproject.toml": '[project]\nname = "scrapetool"\n',
+            "scrapetool/src/scrapetool/__init__.py": "",
+            "scrapetool/tests/test_x.py": "",
+            "eclipse-flow/pyproject.toml": '[project]\nname = "eclipse-flow"\n',
+            "eclipse-flow/src/eclipse_flow/__init__.py": "",
+            "devlibs/pyproject.toml": '[project]\nname = "devlib"\n',
+            ".gitmodules": '[submodule "coordpy"]\n\tpath = coordpy\n\turl = git@github.com:will-roscoe/coordpy.git\n',
+        },
+    )
+    rows = {r["name"]: r for r in detect(git_repo.path).values["subprojects"]}
+    assert rows["scrapetool"] == {
+        "name": "scrapetool",
+        "path": "scrapetool",
+        "package": "scrapetool",
+        "tests": "scrapetool/tests",
+    }
+    assert rows["eclipse_flow"]["path"] == "eclipse-flow"
+    assert rows["eclipse_flow"]["package"] == "eclipse_flow"
+    assert "tests" not in rows["eclipse_flow"]
+    assert rows["devlib"]["package"] == "devlib"
+    assert rows["coordpy"] == {"name": "coordpy", "path": "coordpy", "kind": "submodule"}
+    assert detect(git_repo.path).values["ci.coverage.flags"] == "subproject"
