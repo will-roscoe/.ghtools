@@ -1,0 +1,129 @@
+name: ghtools release
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        type: boolean
+        default: false
+    outputs:
+      released:
+        value: ${{ jobs.release.outputs.released }}
+      tag:
+        value: ${{ jobs.release.outputs.tag }}
+      version:
+        value: ${{ jobs.release.outputs.version }}
+      dist-artifact:
+        value: ${{ jobs.release.outputs.dist-artifact }}
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      released: ${{ steps.publish.outputs.released || 'false' }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+      dist-artifact: ghtools-dist
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Decide
+        id: decide
+        env:
+          # Lets `decide` resume a ghtools tag that an earlier run pushed but never released.
+          GH_TOKEN: ${{ github.token }}
+        run: ghtools release decide --github-output
+      - name: Dry-run summary
+        if: inputs.dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ghtools release decide --summary >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare the release commit and tag locally
+        if: steps.decide.outputs.released == 'true' && steps.decide.outputs.resume != 'true' && !inputs.dry-run
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Assign first: a failing `release prepare` then fails this step instead of being
+          # swallowed and releasing a tag whose version file still has the old version.
+          changed_out="$(ghtools release prepare "$VERSION")"
+          if [ -n "$changed_out" ]; then
+            mapfile -t changed <<<"$changed_out"
+            git add -- "${changed[@]}"
+            git commit -m "chore(release): $TAG [skip ci]"
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+      - name: Check out the tag to resume
+        if: steps.decide.outputs.resume == 'true' && !inputs.dry-run
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: git checkout --detach "$TAG"
+      - name: Build
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet build
+          ghtools release build --out dist
+      - name: Push release commit and tag
+        id: push
+        if: steps.decide.outputs.released == 'true' && steps.decide.outputs.resume != 'true' && !inputs.dry-run
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          branch="$(ghtools config get branch)"
+          if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            if ! git push origin "HEAD:$branch"; then
+              git fetch --quiet origin "$branch"
+              if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then
+                # No rebase: commits pushed after this run started haven't passed this run's CI.
+                # The queued run for the newer push releases everything together.
+                echo "::notice::$branch moved since this run started, so nothing was released here; the next run releases these commits together."
+                echo "pushed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "::error::Pushing the release commit to $branch was rejected. If a ruleset protects $branch, add GitHub Actions to its bypass list or set release.commit = false in .github/ghtools.toml."
+              exit 1
+            fi
+          fi
+          git push origin "refs/tags/$TAG"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run && (steps.decide.outputs.resume == 'true' || steps.push.outputs.pushed == 'true')
+        with:
+          name: ghtools-dist
+          path: dist/
+          if-no-files-found: ignore
+      - name: GitHub release
+        id: publish
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run && (steps.decide.outputs.resume == 'true' || steps.push.outputs.pushed == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.decide.outputs.version }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ghtools release notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          args=("$TAG" --title "$TAG" --verify-tag)
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            args+=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+            args+=(--generate-notes)
+          fi
+          case "$TAG" in *-*) args+=(--prerelease) ;; esac
+          shopt -s nullglob
+          files=(dist/*)
+          gh release create "${args[@]}" "${files[@]}"
+          echo "released=true" >> "$GITHUB_OUTPUT"

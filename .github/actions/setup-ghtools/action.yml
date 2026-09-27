@@ -1,0 +1,27 @@
+name: setup-ghtools
+description: >-
+  Install the ghtools CLI from this action's own copy of the repository (the same commit
+  as the calling workflow) into an isolated Python 3.12 venv, and put only `ghtools` on
+  PATH so the job's own Python stays the default interpreter.
+runs:
+  using: composite
+  steps:
+    - id: py
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+        update-environment: false
+    - name: Install ghtools
+      shell: bash
+      env:
+        GHTOOLS_SRC: ${{ github.action_path }}/../../..
+        PY: ${{ steps.py.outputs.python-path }}
+        # The action's copy has no .git, so hatch-vcs can't compute a version.
+        SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0"
+      run: |
+        set -euo pipefail
+        "$PY" -m venv "$RUNNER_TEMP/ghtools-venv"
+        "$RUNNER_TEMP/ghtools-venv/bin/python" -m pip install --quiet "$GHTOOLS_SRC"
+        mkdir -p "$RUNNER_TEMP/ghtools-bin"
+        ln -sf "$RUNNER_TEMP/ghtools-venv/bin/ghtools" "$RUNNER_TEMP/ghtools-bin/ghtools"
+        echo "$RUNNER_TEMP/ghtools-bin" >> "$GITHUB_PATH"
