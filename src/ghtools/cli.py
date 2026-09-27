@@ -296,7 +296,7 @@ def _cmd_ci_matrix(args: Any) -> int:
     from .subprojects import matrix
 
     root = repo_dir(args)
-    m, any_legs = matrix(_config.load(root), root, args.base, args.head)
+    m, any_legs = matrix(_config.load(root), root, args.base, args.head, force=args.all)
     if args.github_output:
         write_github_output(
             {"matrix": json.dumps(m, separators=(",", ":")), "any": str(any_legs).lower()}
@@ -326,6 +326,7 @@ def _ci_commands(sub: Any) -> None:
     m.add_argument("--base", default="")
     m.add_argument("--head", default="HEAD")
     m.add_argument("--github-output", action="store_true")
+    m.add_argument("--all", action="store_true", help="every subproject (a [ci] directive)")
     m.set_defaults(handler=_cmd_ci_matrix)
 
 

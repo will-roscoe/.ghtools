@@ -47,11 +47,14 @@ def select(cfg: Config, files: list[str] | None) -> list[str]:
 PLACEHOLDER = {"python": "none", "runner": "ubuntu-latest"}
 
 
-def matrix(cfg: Config, root: Path, base: str, head: str) -> tuple[dict[str, Any], bool]:
+def matrix(
+    cfg: Config, root: Path, base: str, head: str, force: bool = False
+) -> tuple[dict[str, Any], bool]:
     include = list(export(cfg)["matrix"]["include"]) if cfg.get("profile") == "python" else []
     rows = in_tree(cfg)
     if rows:
-        picked = select(cfg, changed_between(Path(root), base, head))
+        # force (a `[ci]` directive): every subproject, as when the diff is unknown.
+        picked = select(cfg, None if force else changed_between(Path(root), base, head))
         by_name = {r["name"]: r for r in rows}
         python, runner = cfg.get("ci.python")[-1], cfg.get("ci.runners")[0]
         include += [

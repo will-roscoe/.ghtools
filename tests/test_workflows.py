@@ -319,3 +319,11 @@ def test_rendered_stub_passes_actionlint(tmp_path, dispatch):
         ["actionlint", "-no-color", str(wf / "ghtools.yml")], capture_output=True, text=True
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_forced_ci_selects_every_subproject_and_no_dead_outputs():
+    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    config_job = doc["jobs"]["config"]
+    step = next(s for s in config_job["steps"] if s.get("id") == "matrix")
+    assert "FORCE_CI" in step["env"] and "--all" in step["run"]
+    assert "force-ci" not in config_job["outputs"]  # only the step output is used

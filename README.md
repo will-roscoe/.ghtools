@@ -49,7 +49,7 @@ branch act on that pipeline run, written `[name]` or `/name`:
 | `[ci]`, `[test]`, `[test-full]`, `[lint]`, `[coverage]` (optionally `:py`) | run CI even if no watched path changed |
 | any of those with another language, e.g. `[lint:f2]` | a warning; nothing to run |
 | `[docs]` | a notice: docs already build on every run |
-| a name listed in `dispatch` | start that repository workflow (`gh workflow run`) |
+| a name listed in `dispatch` | start that repository workflow (`gh workflow run`) once the pipeline succeeds |
 
 ```toml
 [directives]

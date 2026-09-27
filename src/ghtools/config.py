@@ -296,11 +296,12 @@ def _cross_checks(cfg: Config) -> None:
     from .directives import BUILTIN as DIRECTIVES
 
     for name, workflow in cfg.get("directives.dispatch").items():
-        if name in DIRECTIVES:
+        if name in DIRECTIVES or name.removesuffix("-full") in DIRECTIVES:
             raise ConfigError(f"directives.dispatch: {name!r} is a built-in directive")
         if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
             raise ConfigError(f"directives.dispatch: {name!r} must match [a-z][a-z0-9-]*")
-        if "/" in workflow or not workflow.endswith((".yml", ".yaml")):
+        # dispatch.yml word-splits the list, so names must be plain file names.
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*\.ya?ml", workflow):
             raise ConfigError(
                 f"directives.dispatch.{name}: expected a workflow file name like ci.yml, "
                 f"got {workflow!r}"

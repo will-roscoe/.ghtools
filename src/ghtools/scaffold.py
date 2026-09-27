@@ -164,6 +164,26 @@ def current_stub(root: Path) -> str:
     )
 
 
+def _tests_importing(root: Path, modules: list[str]) -> list[tuple[str, str]]:
+    """(test file, module) for tracked Python tests that import one of the removed scripts."""
+    if not modules:
+        return []
+    listing = git("ls-files", "*.py", cwd=root, check=False).splitlines()
+    found: list[tuple[str, str]] = []
+    for rel in listing:
+        if rel.startswith(".github/") or not (root / rel).is_file():
+            continue
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        for module in modules:
+            if re.search(
+                rf"^\s*(?:from\s+{re.escape(module)}\s+import|import\s+{re.escape(module)}\b)",
+                text,
+                re.M,
+            ):
+                found.append((rel, module))
+    return found
+
+
 @dataclass
 class Plan:
     write: dict[str, str] = field(default_factory=dict)
@@ -235,7 +255,13 @@ def make_plan(
         cfg.get("branch"), pypi, ref, dispatch=bool(cfg.get("directives.dispatch"))
     )
     if not keep_old:
-        plan.remove += [s for s in REPLACED_SCRIPTS if (root / s).is_file()]
+        removed = [s for s in REPLACED_SCRIPTS if (root / s).is_file()]
+        plan.remove += removed
+        for test, module in _tests_importing(root, [Path(s).stem for s in removed]):
+            plan.notes.append(
+                f"{test} imports {module}, which init removes; delete that test (ghtools covers "
+                "what the script did) or it will fail at collection"
+            )
         status_dir = root / ".github/status"
         if status_dir.is_dir():
             plan.remove += [

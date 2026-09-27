@@ -36,7 +36,6 @@ jobs:
       run-ci: ${{ steps.paths.outputs.run-ci }}
       matrix: ${{ steps.matrix.outputs.matrix }}
       any: ${{ steps.matrix.outputs.any }}
-      force-ci: ${{ steps.directives.outputs.force-ci || 'false' }}
       dispatch: ${{ steps.directives.outputs.dispatch || '[]' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,7 +91,11 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: ghtools ci matrix --base "$BASE" --head "$HEAD" --github-output
+          FORCE_CI: ${{ steps.directives.outputs.force-ci }}
+        run: |
+          args=(--base "$BASE" --head "$HEAD" --github-output)
+          if [ "$FORCE_CI" = "true" ]; then args+=(--all); fi
+          ghtools ci matrix "${args[@]}"
 
   ci-python:
     needs: config
