@@ -329,6 +329,9 @@ def init_repo(
     commit = git("rev-parse", "--short", "HEAD", cwd=root, check=False).strip() or "no commits"
     if plan.archive:
         snap = archive.snapshot(root, today or date.today().isoformat(), commit)
+        for rel, text in plan.write.items():
+            if not rel.startswith(".github/") and (root / rel).is_file():
+                archive.save_root_file(snap, rel, (root / rel).read_bytes(), text)
         out(f"archived .github to {snap.relative_to(root).as_posix()}/")
     for rel in plan.remove:
         (root / rel).unlink()
@@ -388,7 +391,9 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         targets = [
             (Path(".github") / f.relative_to(snap)).as_posix()
             for f in sorted(snap.rglob("*"))
-            if f.is_file() and f.relative_to(snap).as_posix() != "README.md"
+            if f.is_file()
+            and f.relative_to(snap).as_posix() != "README.md"
+            and f.relative_to(snap).parts[0] != archive.ROOT_FILES
         ]
         source = f"snapshot {snap.relative_to(root).as_posix()}"
     elif tag_exists("pre-ghtools", root):
@@ -402,6 +407,17 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         )
     for rel in targets:
         out(f"restore {rel}  (from {source})")
+    root_restores: list[tuple[str, bytes]] = []
+    for rel, (original, written) in (archive.root_files(snap) if snap else {}).items():
+        current = (root / rel).read_text(encoding="utf-8") if (root / rel).is_file() else None
+        if current == written:
+            root_restores.append((rel, original))
+            out(f"restore {rel}  (from {source})")
+        else:
+            out(
+                f"note    {rel} changed since init, so it is left as is; it may still reference "
+                "the ghtools status branch or ghtools:sync markers"
+            )
     for rel in ours:
         out(f"delete  {rel}")
     if dry_run:
@@ -415,6 +431,8 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
         )
     if snap is not None:
         archive.restore(root, snap)
+        for rel, original in root_restores:
+            (root / rel).write_bytes(original)
         shutil.rmtree(snap)
         base = root / archive.ARCHIVE_DIR
         if base.exists() and not any(base.iterdir()):
