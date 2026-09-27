@@ -1,7 +1,9 @@
 # ghtools
 
+<img src="https://github.com/will-roscoe/.ghtools/raw/ghtools-status/status.svg" alt="ghtools status" width="900">
+
 Shared GitHub tooling for will-roscoe's repositories. CI, Conventional-Commit releases, docs
-and (from piece B) the status card are defined once here. Each repo *references* them, so a
+and the status card are defined once here. Each repo *references* them, so a
 change here reaches every repo on its next run without a commit to that repo.
 
 ## Using it in a repo

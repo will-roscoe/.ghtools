@@ -1,0 +1,48 @@
+name: ghtools status
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The version just released, if any
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # A stale badge is better than a red pipeline: publishing can never fail the run.
+    continue-on-error: true
+    permissions:
+      contents: write
+    concurrency:
+      group: ghtools-status
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ghtools-status-*
+          path: ${{ runner.temp }}/status-in
+          merge-multiple: false
+      - name: Collect and publish
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          IN: ${{ runner.temp }}/status-in
+          OUT: ${{ runner.temp }}/status-out
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT"
+          issues="$(gh api "repos/$GITHUB_REPOSITORY" --jq .open_issues_count 2>/dev/null || true)"
+          ghtools status collect ci --legs "$IN" --out "$OUT/ci.json"
+          project_args=(--version "$VERSION" --out "$OUT/project.json")
+          if [ -n "$issues" ]; then project_args+=(--open-issues "$issues"); fi
+          ghtools status collect project "${project_args[@]}"
+          if [ -f "$IN/ghtools-status-docs/docs.json" ]; then cp "$IN/ghtools-status-docs/docs.json" "$OUT/docs.json"; fi
+          ghtools status publish "$OUT"/*.json

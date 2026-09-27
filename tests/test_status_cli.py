@@ -86,3 +86,35 @@ def test_url_command(git_repo, capsys):
     git_repo.run("remote", "add", "origin", "git@github.com:o/r.git")
     assert main(["-C", str(git_repo.path), "status", "url"]) == 0
     assert capsys.readouterr().out.strip() == "https://github.com/o/r/raw/ghtools-status/status.svg"
+
+
+def test_collect_ci_ignores_non_leg_json(git_repo, tmp_path):
+    # status.yml downloads every ghtools-status-* artifact, including the docs fragment.
+    git_repo.commit("feat: a", {".github/ghtools.toml": TOML})
+    legs = tmp_path / "in"
+    (legs / "ghtools-status-docs").mkdir(parents=True)
+    (legs / "ghtools-status-docs/docs.json").write_text('{"source": "docs", "build": "passing"}')
+    (legs / "leg").mkdir()
+    (legs / "leg/status-leg.json").write_text(
+        '{"python": "3.12", "runner": "ubuntu-latest", "status": "passing", "gates": "passing",'
+        ' "tests": {"passed": 1, "failed": 0, "skipped": 0, "total": 1, "duration_s": 0},'
+        ' "coverage": null, "canonical": true, "docstrings": null}'
+    )
+    out = tmp_path / "ci.json"
+    assert (
+        main(
+            [
+                "-C",
+                str(git_repo.path),
+                "status",
+                "collect",
+                "ci",
+                "--legs",
+                str(legs),
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    assert [p["version"] for p in json.loads(out.read_text())["python"]] == ["3.12"]

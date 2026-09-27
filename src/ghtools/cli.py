@@ -447,6 +447,7 @@ def _cmd_status_collect(args: Any) -> int:
             if args.legs and Path(args.legs).is_dir()
             else []
         )
+        legs = [lg for lg in legs if "python" in lg]  # skip other artifacts' JSON (docs.json)
         fragment = fr.ci_fragment(legs, cfg.get("ci.gates"))
     elif args.source == "docs":
         fragment = fr.docs_fragment(args.result, args.coverage_gate)

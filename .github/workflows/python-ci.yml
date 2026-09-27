@@ -39,11 +39,13 @@ jobs:
       - name: Install
         run: ghtools ci install
       - name: Gates
+        id: gates
         if: strategy.job-index == 0
         run: |
           ghtools gates install --stage test
           ghtools gates run --stage test
       - name: Test
+        id: test
         # Runs even if a gate failed, so coverage and test results always report;
         # the failed gate still fails the job.
         if: ${{ !cancelled() }}
@@ -64,6 +66,25 @@ jobs:
           files: junit.xml
           disable_search: true
           flags: ${{ inputs.flags == 'python-version' && format('py{0}', matrix.python) || '' }}
+
+      - name: Record status leg
+        if: ${{ !cancelled() }}
+        env:
+          PY: ${{ matrix.python }}
+          RUNNER: ${{ matrix.runner }}
+          OUTCOME: ${{ steps.test.outcome }}
+          GATES: ${{ steps.gates.outcome }}
+          CANONICAL: ${{ strategy.job-index == 0 }}
+        run: |
+          args=(--python "$PY" --runner "$RUNNER" --outcome "$OUTCOME" --gates-outcome "$GATES" --out "$RUNNER_TEMP/status-leg.json")
+          if [ "$CANONICAL" = "true" ]; then args+=(--canonical); fi
+          ghtools status leg "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: ghtools-status-leg-${{ matrix.python }}-${{ matrix.runner }}
+          path: ${{ runner.temp }}/status-leg.json
+          retention-days: 1
 
   docker:
     if: inputs.docker
