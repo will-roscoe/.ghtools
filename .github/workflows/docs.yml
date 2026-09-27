@@ -23,8 +23,9 @@ jobs:
           python-version: "3.12"
       - name: System packages
         run: |
-          mapfile -t pkgs < <(ghtools config get docs.apt)
-          if [ "${#pkgs[@]}" -gt 0 ]; then
+          pkgs_out="$(ghtools config get docs.apt)"
+          if [ -n "$pkgs_out" ]; then
+            mapfile -t pkgs <<<"$pkgs_out"
             sudo apt-get update -qq
             sudo apt-get install -y -qq "${pkgs[@]}"
           fi
@@ -37,7 +38,9 @@ jobs:
           ghtools gates install --stage docs
           ghtools gates run --stage docs
       - id: html
-        run: echo "dir=$(ghtools docs html-dir)" >> "$GITHUB_OUTPUT"
+        run: |
+          dir="$(ghtools docs html-dir)"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         if: inputs.deploy
         with:

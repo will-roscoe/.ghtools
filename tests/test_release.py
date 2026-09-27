@@ -39,6 +39,7 @@ def test_feature_bumps_minor(git_repo):
         "version": "0.2.0",
         "tag": "v0.2.0",
         "reason": d.reason,
+        "resume": "false",
     }
 
 
@@ -148,3 +149,47 @@ def test_cli_release_prepare_prints_changed_paths(git_repo, capsys):
     git_repo.commit("feat: b")
     assert main(["-C", str(git_repo.path), "release", "prepare", "0.2.0"]) == 0
     assert capsys.readouterr().out == "CHANGELOG.md\n"
+
+
+def _ghtools_tag(repo, tag):
+    repo.run("tag", "-a", tag, "-m", f"Release {tag}")
+
+
+def test_resume_when_latest_ghtools_tag_has_no_github_release(git_repo):
+    git_repo.commit("feat: a")
+    _ghtools_tag(git_repo, "v0.1.0")
+    d = release.decide(_cfg(), git_repo.path, has_release=lambda _tag: False)
+    assert (d.release, d.resume, d.version, d.tag) == (True, True, "0.1.0", "v0.1.0")
+    assert d.as_outputs()["resume"] == "true"
+    assert "resuming v0.1.0" in d.reason
+
+
+def test_no_resume_when_the_release_exists_or_tag_is_not_ours(git_repo):
+    git_repo.commit("feat: a")
+    _ghtools_tag(git_repo, "v0.1.0")
+    d = release.decide(_cfg(), git_repo.path, has_release=lambda _tag: True)
+    assert (d.release, d.resume) == (False, False)
+    git_repo.commit("feat: b")
+    git_repo.tag("v0.2.0")  # hand-made tag: message is just "v0.2.0"
+    d = release.decide(_cfg(), git_repo.path, has_release=lambda _tag: False)
+    assert d.resume is False
+    assert d.as_outputs()["resume"] == "false"
+
+
+def test_cli_decide_resumes_via_gh_when_a_token_is_present(git_repo, tmp_path, monkeypatch):
+    git_repo.commit("feat: a")
+    _ghtools_tag(git_repo, "v0.1.0")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "gh").write_text("#!/bin/sh\nexit 1\n")  # `gh release view` → no such release
+    (fake / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}:{__import__('os').environ['PATH']}")
+    monkeypatch.setenv("GH_TOKEN", "x")
+    out = tmp_path / "gh_out"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    assert main(["-C", str(git_repo.path), "release", "decide", "--github-output"]) == 0
+    assert "resume=true" in out.read_text()
+    monkeypatch.delenv("GH_TOKEN")
+    out.write_text("")
+    main(["-C", str(git_repo.path), "release", "decide", "--github-output"])
+    assert "resume=false" in out.read_text()  # no token: never guesses

@@ -100,7 +100,14 @@ def test_release_workflow_contract():
     assert job["outputs"]["dist-artifact"] == "ghtools-dist"
     text = (ROOT / ".github/workflows/release.yml").read_text()
     assert "[skip ci]" in text
-    assert "git pull --rebase" in text
+    # Rebasing would fold commits that never passed this run's CI into the release (review I2).
+    assert "pull --rebase" not in text
+    steps = [s.get("name") for s in job["steps"]]
+    # Tag locally, build, and only then push: a failed build leaves nothing pushed (review I3).
+    assert steps.index("Build") < steps.index("Push release commit and tag")
+    push = next(s for s in job["steps"] if s.get("name") == "Push release commit and tag")
+    assert "::notice::" in push["run"] and "pushed=false" in push["run"]
+    assert any(s.get("name") == "Check out the tag to resume" for s in job["steps"])
 
 
 def test_pipeline_contract_matches_the_stub():
@@ -126,3 +133,17 @@ def test_tests_still_run_and_report_when_a_gate_fails():
     steps = {s.get("name"): s for s in doc["jobs"]["test"]["steps"]}
     assert steps["Test"]["if"] == "${{ !cancelled() }}"
     assert "!cancelled()" in steps["Upload coverage to Codecov"]["if"]
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_ghtools_failures_are_never_swallowed(path):
+    # `< <(cmd)` and `echo "...$(cmd)"` both discard cmd's exit status under set -e (review C1).
+    for run in _runs(yaml.safe_load(path.read_text())):
+        assert not re.search(r"<\s*<\(\s*ghtools", run), f"{path.name}: process substitution of ghtools"
+        assert not re.search(r"echo\s+\"[^\"]*\$\(ghtools", run), f"{path.name}: ghtools inside echo"
+
+
+def test_config_job_can_see_a_pending_resume():
+    doc = yaml.safe_load((ROOT / ".github/workflows/pipeline.yml").read_text())
+    step = next(s for s in doc["jobs"]["config"]["steps"] if s.get("id") == "decide")
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"

@@ -41,7 +41,8 @@ jobs:
         id: export
         run: |
           ghtools config check
-          echo "config=$(ghtools config export --json)" >> "$GITHUB_OUTPUT"
+          config="$(ghtools config export --json)"
+          echo "config=$config" >> "$GITHUB_OUTPUT"
       - name: Default branch?
         id: ref
         env:
@@ -56,6 +57,8 @@ jobs:
       - name: Would this release?
         id: decide
         if: steps.ref.outputs.default-ref == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ghtools release decide --github-output
       - name: Should CI run?
         id: paths
@@ -67,7 +70,8 @@ jobs:
           if [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ]; then
             echo "run-ci=true" >> "$GITHUB_OUTPUT"
           else
-            echo "run-ci=$(ghtools ci should-run --base "$BEFORE")" >> "$GITHUB_OUTPUT"
+            run_ci="$(ghtools ci should-run --base "$BEFORE")"
+            echo "run-ci=$run_ci" >> "$GITHUB_OUTPUT"
           fi
 
   ci-python:

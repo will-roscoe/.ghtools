@@ -127,11 +127,27 @@ def _version_commands(sub: Any) -> None:
     n.set_defaults(handler=_cmd_version_next)
 
 
+def _release_checker(root: Path) -> Callable[[str], bool] | None:
+    """`gh release view` as a has-release check, only when gh and a token are available."""
+    import shutil
+
+    if not shutil.which("gh") or not (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
+        return None
+
+    def has_release(tag: str) -> bool:
+        return (
+            subprocess.run(["gh", "release", "view", tag], cwd=root, capture_output=True).returncode
+            == 0
+        )
+
+    return has_release
+
+
 def _cmd_release_decide(args: Any) -> int:
     from . import release
 
     root = repo_dir(args)
-    decision = release.decide(_config.load_or_defaults(root), root)
+    decision = release.decide(_config.load_or_defaults(root), root, _release_checker(root))
     if args.github_output:
         write_github_output(decision.as_outputs())
     if args.summary:

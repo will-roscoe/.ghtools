@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 from .changelog import finalize_changelog, release_section
 from .config import Config
 from .errors import CheckFailed
-from .gitutil import latest_tag, log_messages, log_subjects, since_range, tag_exists
+from .gitutil import git, latest_tag, log_messages, log_subjects, since_range, tag_exists
 from .version import compute_next_version
 from .versionfile import read_version, version_file, write_version
 
@@ -25,6 +26,7 @@ class Decision:
     tag: str
     current: str
     reason: str
+    resume: bool = False  # tag already pushed by an earlier run, GitHub release still missing
 
     def as_outputs(self) -> dict[str, str]:
         return {
@@ -32,6 +34,7 @@ class Decision:
             "version": self.version,
             "tag": self.tag,
             "reason": self.reason,
+            "resume": "true" if self.resume else "false",
         }
 
     def summary(self) -> str:
@@ -39,10 +42,26 @@ class Decision:
         return f"{head}\n\n{self.reason}\n\n_Dry run: nothing was written or tagged._\n"
 
 
-def decide(cfg: Config, root: Path) -> Decision:
+def _made_by_ghtools(tag: str, root: Path) -> bool:
+    """release.yml annotates its tags "Release <tag>"; hand-made tags are never resumed."""
+    subject = git("tag", "-l", "--format=%(contents:subject)", tag, cwd=root, check=False).strip()
+    return subject == f"Release {tag}"
+
+
+def decide(cfg: Config, root: Path, has_release: Callable[[str], bool] | None = None) -> Decision:
+    """Decide the next release. With `has_release`, a ghtools-made latest tag that has no
+    GitHub release yet (a run that failed after pushing the tag) is resumed, not skipped."""
     if not cfg.get("release.enabled"):
         return Decision(False, "", "", "", "release.enabled = false")
     current = latest_tag(root)
+    if (
+        current
+        and has_release is not None
+        and _made_by_ghtools(current, root)
+        and not has_release(current)
+    ):
+        reason = f"resuming {current}: the tag exists but has no GitHub release"
+        return Decision(True, current[1:], current, current, reason, resume=True)
     messages = log_messages(since_range(current), root)
     nxt = compute_next_version(
         current, messages, zero_major_breaking=cfg.get("version.zero-major-breaking")
