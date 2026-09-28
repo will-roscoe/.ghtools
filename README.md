@@ -40,6 +40,7 @@ the workflows ghtools replaces. `ghtools deinit` undoes it.
 | `ghtools status url` / `render` | the status card's README URL / a local preview of the status branch |
 | `ghtools stub [--write]` | the workflow stub for the current settings, keeping its pinned ref |
 | `ghtools readme sync --check` / `--write` | check or regenerate README blocks (`[[readme.block]]`) from their single source |
+| `ghtools codecov --check` / `--write` | check or write `.github/codecov.yml` from `[ci.coverage]` (project may drop `threshold` points, default 2; patch is informational; `[[ci.coverage.component]]` rows become Codecov components) |
 
 ## Commit directives
 

@@ -14,7 +14,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from . import archive
+from . import archive, codecov
 from .ci import STUB_PATH
 from .config import CONFIG_PATH, dump_toml, from_dict, load
 from .detect import Detection, detect
@@ -350,6 +350,16 @@ def make_plan(
         dispatch=bool(cfg.get("directives.dispatch")),
         private_deps=cfg.get("ci.private-deps"),
     )
+    if cfg.get("ci.coverage.codecov"):
+        others = codecov.other_configs(root)
+        if others:
+            plan.notes.append(
+                f"{', '.join(others)} configures Codecov; move its settings into [ci.coverage] "
+                "(threshold, [[ci.coverage.component]]), delete it, then run "
+                "`ghtools codecov --write`"
+            )
+        else:
+            plan.write[codecov.PATH] = codecov.render(cfg)
     if not keep_old:
         removed = [s for s in REPLACED_SCRIPTS if (root / s).is_file()]
         plan.remove += removed
@@ -566,7 +576,7 @@ def deinit_repo(root: Path, *, dry_run: bool = False, out: Callable[[str], None]
     if not is_work_tree_root(root):
         raise PreconditionError("run ghtools deinit from the repository root")
     snap = archive.latest_snapshot(root)
-    ours = [p for p in (CONFIG_PATH, STUB_PATH) if (root / p).exists()]
+    ours = [p for p in (CONFIG_PATH, STUB_PATH, codecov.PATH) if (root / p).exists()]
     if snap is not None:
         targets = [
             (Path(".github") / f.relative_to(snap)).as_posix()
