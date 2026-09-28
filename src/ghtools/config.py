@@ -59,6 +59,7 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "paths": Field(list, ["**.py", "pyproject.toml"]),
         "gates": Field(list, ["ruff", "ruff-format"]),
         "docker": Field(bool, False),
+        "setup": Field(list, []),  # commands run after install, before gates and tests
     },
     "ci.coverage": {
         "package": Field(str, ""),

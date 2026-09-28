@@ -316,8 +316,10 @@ def _ci_commands(sub: Any) -> None:
     tst = cs.add_parser("test", help="run ci.test (or a subproject's tests) with coverage/junit")
     tst.add_argument("--subproject", default=None)
     tst.set_defaults(handler=_cmd_ci_test)
-    stp = cs.add_parser("setup", help="run a subproject's setup commands (failures warn)")
-    stp.add_argument("--subproject", required=True)
+    stp = cs.add_parser(
+        "setup", help="run ci.setup, or a subproject's setup, after install (failures warn)"
+    )
+    stp.add_argument("--subproject", default=None)
     stp.set_defaults(handler=_cmd_ci_setup)
     s = cs.add_parser("should-run", help="does a push since BASE touch ci.paths? (true/false)")
     s.add_argument("--base", default="")

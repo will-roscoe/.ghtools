@@ -196,11 +196,14 @@ def _tests_importing(root: Path, modules: list[str]) -> list[tuple[str, str]]:
             continue
         text = (root / rel).read_text(encoding="utf-8", errors="replace")
         for module in modules:
-            if re.search(
+            imported = re.search(
                 rf"^\s*(?:from\s+{re.escape(module)}\s+import|import\s+{re.escape(module)}\b)",
                 text,
                 re.M,
-            ):
+            )
+            # Tests also load scripts by path (importlib.util.spec_from_file_location).
+            by_path = re.search(rf"[\"'/]{re.escape(module)}\.py[\"']", text)
+            if imported or by_path:
                 found.append((rel, module))
     return found
 

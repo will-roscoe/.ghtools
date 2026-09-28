@@ -146,3 +146,12 @@ def test_subproject_without_tests_passes_with_a_notice(tmp_path, capfd):
     (tmp_path / "a/README.md").write_text("no tests here\n")
     assert main(["-C", str(tmp_path), "ci", "test", "--subproject", "a"]) == 0
     assert "no tests collected for a" in capfd.readouterr().out
+
+
+def test_root_setup_commands_run_after_install(tmp_path, capfd):
+    # sph-dev patches its pinned sarracen after installing (src/setup/applysetup.py update).
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/ghtools.toml").write_text('[ci]\nsetup = ["echo patched-root"]\n')
+    assert ci.setup_commands(config.load(tmp_path), None) == ["echo patched-root"]
+    assert main(["-C", str(tmp_path), "ci", "setup"]) == 0
+    assert "patched-root" in capfd.readouterr().out
