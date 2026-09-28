@@ -280,6 +280,14 @@ def _cmd_ci_should_run(args: Any) -> int:
     return 0
 
 
+def _cmd_ci_code_changed(args: Any) -> int:
+    from . import ci
+
+    root = repo_dir(args)
+    print("true" if ci.code_changed(_config.load(root), root, args.base) else "false")
+    return 0
+
+
 def _cmd_ci_setup(args: Any) -> int:
     from . import ci
 
@@ -324,6 +332,11 @@ def _ci_commands(sub: Any) -> None:
     s = cs.add_parser("should-run", help="does a push since BASE touch ci.paths? (true/false)")
     s.add_argument("--base", default="")
     s.set_defaults(handler=_cmd_ci_should_run)
+    cc = cs.add_parser(
+        "code-changed", help="does the change since BASE touch ci.paths? (true/false)"
+    )
+    cc.add_argument("--base", default="")
+    cc.set_defaults(handler=_cmd_ci_code_changed)
     m = cs.add_parser("matrix", help="the CI matrix for this change, as one JSON line")
     m.add_argument("--base", default="")
     m.add_argument("--head", default="HEAD")
