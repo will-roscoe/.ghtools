@@ -354,3 +354,9 @@ def test_dispatch_names_and_files_are_strict(dispatch, message):
 def test_private_deps_setting():
     assert config.from_dict({}).get("ci.private-deps") is False
     assert config.from_dict({"ci": {"private-deps": True}}).get("ci.private-deps") is True
+
+
+def test_codecov_is_on_by_default_and_can_be_turned_off():
+    assert config.from_dict({}).get("ci.coverage.codecov") is True
+    off = config.from_dict({"ci": {"coverage": {"codecov": False}}})
+    assert off.get("ci.coverage.codecov") is False

@@ -65,7 +65,7 @@ SCHEMA: dict[str, dict[str, Field]] = {
     "ci.coverage": {
         "package": Field(str, ""),
         "floor": Field(int, 0),
-        "codecov": Field(bool, False),
+        "codecov": Field(bool, True),  # uploads need a CODECOV_TOKEN secret; skipped without one
         "flags": Field(str, "python-version", _c("python-version", "subproject", "none")),
     },
     "docs": {
