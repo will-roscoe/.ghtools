@@ -495,3 +495,18 @@ def test_stub_passes_the_deps_token_only_when_private_deps_are_on(git_repo):
         },
     )
     assert "DEPS_TOKEN" in scaffold.current_stub(git_repo.path)
+
+
+def test_init_writes_the_codecov_policy(git_repo):
+    repo = _python_repo(git_repo)
+    assert scaffold.init_repo(repo.path, yes=True, out=_quiet, today="2026-09-28") == 0
+    assert "threshold: 2%" in (repo.path / ".github/codecov.yml").read_text()
+
+
+def test_init_leaves_an_existing_codecov_file_and_says_how_to_move_it(git_repo):
+    repo = _python_repo(git_repo)
+    git_repo.commit("chore: codecov", {"codecov.yml": "coverage:\n  precision: 2\n"})
+    lines: list[str] = []
+    assert scaffold.init_repo(repo.path, yes=True, out=lines.append, today="2026-09-28") == 0
+    assert not (repo.path / ".github/codecov.yml").exists()
+    assert any("codecov.yml" in ln and "[ci.coverage]" in ln for ln in lines)

@@ -280,6 +280,14 @@ def _cmd_ci_should_run(args: Any) -> int:
     return 0
 
 
+def _cmd_ci_code_changed(args: Any) -> int:
+    from . import ci
+
+    root = repo_dir(args)
+    print("true" if ci.code_changed(_config.load(root), root, args.base) else "false")
+    return 0
+
+
 def _cmd_ci_setup(args: Any) -> int:
     from . import ci
 
@@ -324,6 +332,11 @@ def _ci_commands(sub: Any) -> None:
     s = cs.add_parser("should-run", help="does a push since BASE touch ci.paths? (true/false)")
     s.add_argument("--base", default="")
     s.set_defaults(handler=_cmd_ci_should_run)
+    cc = cs.add_parser(
+        "code-changed", help="does the change since BASE touch ci.paths? (true/false)"
+    )
+    cc.add_argument("--base", default="")
+    cc.set_defaults(handler=_cmd_ci_code_changed)
     m = cs.add_parser("matrix", help="the CI matrix for this change, as one JSON line")
     m.add_argument("--base", default="")
     m.add_argument("--head", default="HEAD")
@@ -628,6 +641,37 @@ def _status_commands(sub: Any) -> None:
     url = ss.add_parser("url", help="print the README URL of a status file")
     url.add_argument("path", nargs="?", default="status.svg")
     url.set_defaults(handler=_cmd_status_url)
+
+
+def _cmd_codecov(args: Any) -> int:
+    from . import codecov
+    from .errors import CheckFailed
+
+    root = repo_dir(args)
+    cfg = _config.load(root)
+    changed = codecov.sync(root, cfg, write=args.write)
+    others = codecov.other_configs(root) if cfg.get("ci.coverage.codecov") else []
+    if others:
+        msg = (
+            f"{', '.join(others)} also configures Codecov and can take precedence over "
+            f"{codecov.PATH}; move its settings into [ci.coverage] and delete it"
+        )
+        if args.check:
+            raise CheckFailed(msg)
+        print(f"WARNING: {msg}")
+    if args.check and changed:
+        raise CheckFailed(f"{codecov.PATH} is out of date (run: ghtools codecov --write)")
+    print(f"wrote {codecov.PATH}" if changed and args.write else f"{codecov.PATH} in sync")
+    return 0
+
+
+@registrar
+def _codecov_commands(sub: Any) -> None:
+    p = sub.add_parser("codecov", help="check or write .github/codecov.yml from [ci.coverage]")
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--write", action="store_true")
+    p.set_defaults(handler=_cmd_codecov)
 
 
 def _cmd_readme_sync(args: Any) -> int:

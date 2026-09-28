@@ -37,6 +37,7 @@ jobs:
       default-ref: ${{ steps.ref.outputs.default-ref }}
       would-release: ${{ steps.decide.outputs.released || 'false' }}
       run-ci: ${{ steps.paths.outputs.run-ci }}
+      code-changed: ${{ steps.code.outputs.code-changed }}
       matrix: ${{ steps.matrix.outputs.matrix }}
       any: ${{ steps.matrix.outputs.any }}
       dispatch: ${{ steps.directives.outputs.dispatch || '[]' }}
@@ -89,6 +90,15 @@ jobs:
             run_ci="$(ghtools ci should-run --base "$BEFORE")"
             echo "run-ci=$run_ci" >> "$GITHUB_OUTPUT"
           fi
+      - name: Did code change?
+        id: code
+        # Codecov uploads only for code changes (ci.paths), so docs and settings changes neither
+        # upload nor get a coverage status. A PR compares with its base, a push with the old head.
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          changed="$(ghtools ci code-changed --base "$BASE")"
+          echo "code-changed=$changed" >> "$GITHUB_OUTPUT"
       - name: CI matrix for this change
         id: matrix
         env:
@@ -168,13 +178,13 @@ jobs:
         run: |
           if [ -n "$SUBPROJECT" ]; then ghtools ci test --subproject "$SUBPROJECT"; else ghtools ci test; fi
       - name: Codecov token missing
-        if: ${{ !cancelled() && strategy.job-index == 0 && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN != 'true' }}
+        if: ${{ !cancelled() && strategy.job-index == 0 && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN != 'true' && needs.config.outputs.code-changed == 'true' }}
         run: >-
           echo "::notice title=Codecov upload skipped::No CODECOV_TOKEN secret in this repository.
           Add one (Codecov > the repo > Configuration > General) to upload coverage and test
           results, or set ci.coverage.codecov = false in .github/ghtools.toml."
       - name: Upload coverage to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' }}
+        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' && needs.config.outputs.code-changed == 'true' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -182,7 +192,7 @@ jobs:
           disable_search: true
           flags: ${{ fromJSON(needs.config.outputs.config).flags == 'subproject' && matrix.subproject || (fromJSON(needs.config.outputs.config).flags == 'python-version' && format('py{0}', matrix.python) || '') }}
       - name: Upload test results to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' }}
+        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' && needs.config.outputs.code-changed == 'true' }}
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

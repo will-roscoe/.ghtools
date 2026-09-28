@@ -155,3 +155,16 @@ def test_root_setup_commands_run_after_install(tmp_path, capfd):
     assert ci.setup_commands(config.load(tmp_path), None) == ["echo patched-root"]
     assert main(["-C", str(tmp_path), "ci", "setup"]) == 0
     assert "patched-root" in capfd.readouterr().out
+
+
+def test_code_changed_ignores_docs_and_ghtools_settings(git_repo):
+    # Codecov uploads only when code changed: a docs or settings change runs CI but says
+    # nothing about coverage (sph-dev#110 failed codecov/project on a docs-only change).
+    git_repo.commit("feat: a", {"a.py": "1"})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("docs: readme", {"README.md": "x", ".github/ghtools.toml": "branch = 'main'\n"})
+    cfg = config.from_dict({})
+    assert ci.code_changed(cfg, git_repo.path, base) is False
+    git_repo.commit("fix: code", {"a.py": "2"})
+    assert ci.code_changed(cfg, git_repo.path, base) is True
+    assert ci.code_changed(cfg, git_repo.path, None) is True  # unknown base: upload

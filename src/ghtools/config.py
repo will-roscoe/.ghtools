@@ -66,6 +66,8 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "package": Field(str, ""),
         "floor": Field(int, 0),
         "codecov": Field(bool, True),  # uploads need a CODECOV_TOKEN secret; skipped without one
+        # .github/codecov.yml: how far project coverage may drop (in points) before Codecov fails
+        "threshold": Field(float, 2.0),
         "flags": Field(str, "python-version", _c("python-version", "subproject", "none")),
     },
     "docs": {
@@ -106,6 +108,11 @@ SCHEMA: dict[str, dict[str, Field]] = {
 }
 
 TABLE_ARRAYS: dict[str, dict[str, Field]] = {
+    "ci.coverage.component": {  # a Codecov component: a named group of paths
+        "id": Field(str, None),
+        "name": Field(str, None),
+        "paths": Field(list, None),
+    },
     "ci.gate": {
         "name": Field(str, None),
         "run": Field(str, None),
@@ -184,6 +191,10 @@ def _check_value(dotted: str, field: Field, value: Any) -> Any:
     if field.type is bool:
         if not isinstance(value, bool):
             raise ConfigError(f"{dotted}: expected true or false, got {value!r}")
+    elif field.type is float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConfigError(f"{dotted}: expected a number, got {value!r}")
+        return float(value)
     elif field.type is int:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ConfigError(f"{dotted}: expected an integer, got {value!r}")
@@ -294,6 +305,15 @@ def _cross_checks(cfg: Config) -> None:
             raise ConfigError(f"readme.block[{i}].heading-offset: must be between -1 and 2")
         if block["kind"] == "sync" and not block["source"]:
             raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
+    if cfg.get("ci.coverage.threshold") < 0:
+        raise ConfigError("ci.coverage.threshold: must not be negative")
+    for i, row in enumerate(cfg.get("ci.coverage.component")):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", row["id"]):
+            raise ConfigError(
+                f"ci.coverage.component[{i}].id: {row['id']!r} must match [a-z0-9][a-z0-9_-]*"
+            )
+        if not row["paths"]:
+            raise ConfigError(f"ci.coverage.component[{i}].paths: must not be empty")
     _check_subprojects(cfg)
     from .directives import BUILTIN as DIRECTIVES
 

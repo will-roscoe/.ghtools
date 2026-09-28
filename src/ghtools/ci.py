@@ -107,3 +107,13 @@ def should_run(cfg: Config, root: Path, base: str | None) -> bool:
         return True
     patterns = [glob_to_regex(p) for p in cfg.get("ci.paths")]
     return any(f in _ALWAYS or any(p.match(f) for p in patterns) for f in files)
+
+
+def code_changed(cfg: Config, root: Path, base: str | None) -> bool:
+    """Did code (ci.paths) change since `base`? Unlike should_run, ghtools's own settings and
+    stub don't count: they run CI but say nothing about coverage. Unknown base: True."""
+    files = changed_files(base or "", root)
+    if files is None:
+        return True
+    patterns = [glob_to_regex(p) for p in cfg.get("ci.paths")]
+    return any(any(p.match(f) for p in patterns) for f in files)
