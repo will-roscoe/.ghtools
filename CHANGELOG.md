@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-28
+
+### Features
+
+- **ci**: ci.setup runs commands after install for root legs; init names tests that load removed scripts by path
+
 ## [1.0.3] - 2026-09-28
 
 ### Bug fixes
