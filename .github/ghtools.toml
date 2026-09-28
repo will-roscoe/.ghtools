@@ -26,3 +26,4 @@ enabled = true
 card = ["tests", "coverage", "lint", "release"]
 rows = ["python"]
 badges = ["version", "coverage", "tests", "python"]
+logo = ".github/logo.svg"                      # the card shows the project logo
