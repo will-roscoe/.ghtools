@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-28
+
+### Bug fixes
+
+- **ci**: deploy docs even though some CI jobs upstream are skipped
+
 ## [1.0.2] - 2026-09-27
 
 ### Bug fixes
