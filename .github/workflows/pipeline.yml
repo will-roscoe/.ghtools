@@ -128,12 +128,13 @@ jobs:
           SUBPROJECT: ${{ matrix.subproject }}
         run: |
           if [ -n "$SUBPROJECT" ]; then ghtools ci install --subproject "$SUBPROJECT"; else ghtools ci install; fi
-      - name: Setup (subproject)
-        # After install: python-dev's setup commands import the package.
-        if: matrix.subproject
+      - name: Setup
+        # After install: setup commands may import the package (python-dev's downloads,
+        # sph-dev's sarracen patches). ci.setup for root legs, a subproject's own otherwise.
         env:
           SUBPROJECT: ${{ matrix.subproject }}
-        run: ghtools ci setup --subproject "$SUBPROJECT"
+        run: |
+          if [ -n "$SUBPROJECT" ]; then ghtools ci setup --subproject "$SUBPROJECT"; else ghtools ci setup; fi
       - name: Gates
         id: gates
         # Umbrella repos run their test-stage gates once, in the lint job.

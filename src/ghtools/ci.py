@@ -29,8 +29,11 @@ def _subproject(cfg: Config, name: str) -> dict:
     raise GhtoolsError(f"no subproject named {name!r} in [[subprojects]]")
 
 
-def setup_commands(cfg: Config, subproject: str) -> list[str]:
-    return list(_subproject(cfg, subproject)["setup"])
+def setup_commands(cfg: Config, subproject: str | None) -> list[str]:
+    """Commands run after install: a subproject's own `setup`, or `ci.setup` for the root."""
+    if subproject:
+        return list(_subproject(cfg, subproject)["setup"])
+    return list(cfg.get("ci.setup"))
 
 
 def install_command(cfg: Config, subproject: str | None = None) -> list[str]:

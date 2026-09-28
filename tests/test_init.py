@@ -463,3 +463,20 @@ def test_badges_of_replaced_workflows_point_at_the_stub(git_repo):
     )
     assert "validate.yaml" not in text
     assert "actions/workflows/claude.yml/badge.svg" in text  # kept workflow: untouched
+
+
+def test_init_names_tests_that_load_a_removed_script_by_path(git_repo):
+    # protonfs and sph-dev load .github/scripts/*.py via importlib, which no import statement shows.
+    git_repo.commit(
+        "feat: init",
+        {
+            "pyproject.toml": '[project]\nname = "x"\nversion = "0.1.0"\n',
+            ".github/scripts/finalize_changelog.py": "def finalize(): ...\n",
+            "tests/unit/test_changelog_finalize.py": (
+                "import importlib.util\n"
+                '_SCRIPT = ROOT / ".github" / "scripts" / "finalize_changelog.py"\n'
+            ),
+        },
+    )
+    plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1")
+    assert any("tests/unit/test_changelog_finalize.py" in n for n in plan.notes)

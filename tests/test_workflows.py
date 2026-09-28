@@ -244,7 +244,7 @@ def test_subproject_legs_have_distinct_status_artifacts():
 def test_subproject_setup_runs_after_install():
     # Review D-I4: python-dev's setup (FreeImage, Playwright browser) imports the package.
     names = [s.get("name") for s in _jobs()["test"]["steps"]]
-    assert names.index("Setup (subproject)") > names.index("Install")
+    assert names.index("Setup") > names.index("Install")
 
 
 def test_directives_force_ci_and_export_dispatch():
@@ -347,3 +347,10 @@ def test_jobs_downstream_of_conditional_jobs_do_not_inherit_their_skips():
         conditional = [a for a in ancestors(name) if "if" in jobs[a]]
         if conditional:
             assert "always()" in str(job.get("if", "")), f"{name} inherits skips from {conditional}"
+
+
+def test_setup_runs_for_root_legs_too():
+    step = _step("test", "Setup")
+    assert "if" not in step  # root legs run ci.setup; subproject legs run their own setup
+    names = [s.get("name") for s in _jobs()["test"]["steps"]]
+    assert names.index("Setup") > names.index("Install")
