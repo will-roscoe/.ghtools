@@ -6,6 +6,16 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-28
+
+### Features
+
+- **status**: HACS, lint-only and umbrella repos report tests and lint to the status card
+
+### Documentation
+
+- **status**: give the status card a logo
+
 ## [1.3.0] - 2026-09-28
 
 ### Features
