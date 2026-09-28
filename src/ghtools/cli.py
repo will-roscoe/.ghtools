@@ -491,6 +491,7 @@ def _cmd_status_leg(args: Any) -> int:
             args.canonical,
             docstrings,
             subproject=args.subproject,
+            lint_only=args.lint_only,
         ),
     )
     return 0
@@ -521,7 +522,10 @@ def _cmd_status_collect(args: Any) -> int:
         legs = [lg for lg in legs if "python" in lg]  # skip other artifacts' JSON (docs.json)
         in_tree = [row["name"] for row in _config.in_tree(cfg)]
         previous = _published_ci(root, cfg) if in_tree else None
-        fragment = fr.ci_fragment(legs, cfg.get("ci.gates"), previous=previous, in_tree=in_tree)
+        from .gates import resolve as resolve_gates
+
+        gate_names = [g.name for g in resolve_gates(cfg, "test")]  # built-in, then [[ci.gate]]
+        fragment = fr.ci_fragment(legs, gate_names, previous=previous, in_tree=in_tree)
     elif args.source == "docs":
         # Only the docs-coverage gate measures documentation; other docs gates passing says nothing.
         measured = "docs-coverage" in cfg.get("ci.gates")
@@ -593,6 +597,9 @@ def _status_commands(sub: Any) -> None:
         leg.add_argument(flag, required=True)
     leg.add_argument("--gates-outcome", default="")
     leg.add_argument("--canonical", action="store_true")
+    leg.add_argument(
+        "--lint-only", action="store_true", help="the leg ran gates but no tests (lint job)"
+    )
     leg.add_argument("--subproject", default="")
     leg.set_defaults(handler=_cmd_status_leg)
     col = ss.add_parser("collect", help="build a ci, docs or project fragment")

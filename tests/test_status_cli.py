@@ -201,3 +201,48 @@ def test_collect_ci_carries_unselected_subprojects_from_the_status_branch(git_re
     main([*args, "collect", "ci", "--legs", str(second), "--out", str(tmp_path / "ci2.json")])
     subs = json.loads((tmp_path / "ci2.json").read_text())["subprojects"]
     assert subs == [{"name": "a", "status": "passing"}, {"name": "b", "status": "failing"}]
+
+
+def test_leg_can_record_a_lint_only_leg(git_repo, tmp_path):
+    repo = _repo(git_repo, tmp_path)
+    out = tmp_path / "leg.json"
+    args = ["-C", str(repo.path), "status", "leg", "--python", "3.12", "--runner", "ubuntu-latest"]
+    assert (
+        main(
+            [
+                *args,
+                "--outcome",
+                "success",
+                "--gates-outcome",
+                "success",
+                "--lint-only",
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    assert json.loads(out.read_text())["lint_only"] is True
+
+
+def test_collect_ci_names_custom_gates_on_the_lint_row(git_repo, tmp_path):
+    # bash-helpers' only gates are custom ([[ci.gate]] make-lint, make-validate).
+    toml = (
+        '[ci]\ngates = ["ruff"]\n\n[[ci.gate]]\nname = "make-lint"\nrun = "make lint"\n\n'
+        '[[ci.gate]]\nname = "docs-check"\nrun = "true"\nafter = "docs"\n'
+    )
+    git_repo.commit("feat: a", {".github/ghtools.toml": toml})
+    legs = tmp_path / "in"
+    (legs / "leg").mkdir(parents=True)
+    (legs / "leg/status-leg.json").write_text(
+        '{"python": "3.12", "runner": "ubuntu-latest", "status": "passing", "gates": "passing",'
+        ' "tests": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "duration_s": 0},'
+        ' "coverage": null, "canonical": false, "docstrings": null, "lint_only": true}'
+    )
+    out = tmp_path / "ci.json"
+    args = ["-C", str(git_repo.path), "status", "collect", "ci", "--legs", str(legs)]
+    assert main([*args, "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["lint"] == {
+        "status": "passing",
+        "gates": ["ruff", "make-lint"],
+    }

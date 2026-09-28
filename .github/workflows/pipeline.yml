@@ -245,22 +245,6 @@ jobs:
         run: docker build -t ghtools-ci .
 
   # ---- HACS integrations ----
-  hacs-lint:
-    needs: config
-    if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'hacs'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: $/.github/actions/setup-ghtools
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ fromJSON(needs.config.outputs.config).python_latest }}
-      - run: |
-          ghtools gates install --stage test
-          ghtools gates run --stage test
-
   hacs-test:
     needs: config
     if: needs.config.outputs.run-ci == 'true' && fromJSON(needs.config.outputs.config).profile == 'hacs'
@@ -274,7 +258,33 @@ jobs:
         with:
           python-version: ${{ fromJSON(needs.config.outputs.config).python_latest }}
       - run: ghtools ci install
-      - run: ghtools ci test
+      - name: Gates
+        id: gates
+        run: |
+          ghtools gates install --stage test
+          ghtools gates run --stage test
+      - name: Test
+        id: test
+        # Runs even if a gate failed, so the test result still reports.
+        if: ${{ !cancelled() }}
+        run: ghtools ci test
+      - name: Record status leg
+        if: ${{ !cancelled() }}
+        continue-on-error: true  # status must never fail CI
+        env:
+          PY: ${{ fromJSON(needs.config.outputs.config).python_latest }}
+          OUTCOME: ${{ steps.test.outcome }}
+          GATES: ${{ steps.gates.outcome }}
+        run: >-
+          ghtools status leg --python "$PY" --runner ubuntu-latest --outcome "$OUTCOME"
+          --gates-outcome "$GATES" --canonical --out "$RUNNER_TEMP/status-leg.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          name: ghtools-status-leg-hacs
+          path: ${{ runner.temp }}/status-leg.json
+          retention-days: 1
 
   hassfest:
     needs: config
@@ -312,13 +322,30 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: |
+      - name: Gates
+        id: gates
+        run: |
           ghtools gates install --stage test
           ghtools gates run --stage test
+      - name: Record status leg
+        if: ${{ !cancelled() }}
+        continue-on-error: true  # status must never fail CI
+        env:
+          GATES: ${{ steps.gates.outcome }}
+        run: >-
+          ghtools status leg --python "3.12" --runner ubuntu-latest --outcome "$GATES"
+          --gates-outcome "$GATES" --lint-only --out "$RUNNER_TEMP/status-leg.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          name: ghtools-status-leg-lint
+          path: ${{ runner.temp }}/status-leg.json
+          retention-days: 1
 
   # ---- Docs (Sphinx), deployed to Pages from the default branch ----
   docs:
-    needs: [config, test, tests-passed, docker, hacs-lint, hacs-test, hassfest, hacs, lint]
+    needs: [config, test, tests-passed, docker, hacs-test, hassfest, hacs, lint]
     if: >-
       always() && needs.config.result == 'success' &&
       fromJSON(needs.config.outputs.config).docs.enabled &&
@@ -412,7 +439,7 @@ jobs:
 
   # ---- Release: version from Conventional Commits, tag, GitHub release ----
   release:
-    needs: [config, test, tests-passed, docker, hacs-lint, hacs-test, hassfest, hacs, lint]
+    needs: [config, test, tests-passed, docker, hacs-test, hassfest, hacs, lint]
     if: >-
       always() && needs.config.result == 'success' &&
       needs.config.outputs.default-ref == 'true' &&
@@ -529,7 +556,7 @@ jobs:
 
   # ---- Status card and badges, published to the status branch ----
   status:
-    needs: [config, test, tests-passed, docker, hacs-lint, hacs-test, hassfest, hacs, lint, docs, docs-deploy, release]
+    needs: [config, test, tests-passed, docker, hacs-test, hassfest, hacs, lint, docs, docs-deploy, release]
     if: >-
       always() && needs.config.result == 'success' &&
       needs.config.outputs.default-ref == 'true' &&
