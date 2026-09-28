@@ -117,6 +117,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
+    env:
+      # Codecov is on by default; until a repo adds the secret its uploads are skipped, not failed.
+      HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
@@ -164,8 +167,14 @@ jobs:
           SUBPROJECT: ${{ matrix.subproject }}
         run: |
           if [ -n "$SUBPROJECT" ]; then ghtools ci test --subproject "$SUBPROJECT"; else ghtools ci test; fi
+      - name: Codecov token missing
+        if: ${{ !cancelled() && strategy.job-index == 0 && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN != 'true' }}
+        run: >-
+          echo "::notice title=Codecov upload skipped::No CODECOV_TOKEN secret in this repository.
+          Add one (Codecov > the repo > Configuration > General) to upload coverage and test
+          results, or set ci.coverage.codecov = false in .github/ghtools.toml."
       - name: Upload coverage to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov }}
+        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -173,7 +182,7 @@ jobs:
           disable_search: true
           flags: ${{ fromJSON(needs.config.outputs.config).flags == 'subproject' && matrix.subproject || (fromJSON(needs.config.outputs.config).flags == 'python-version' && format('py{0}', matrix.python) || '') }}
       - name: Upload test results to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov }}
+        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' }}
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

@@ -365,3 +365,17 @@ def test_private_dependency_access_comes_before_install_via_env_only():
         step = _step(job, "Access to private git dependencies")
         assert step["env"]["DEPS_TOKEN"] == "${{ secrets.DEPS_TOKEN }}"
         assert "${{" not in step["run"]  # the token reaches the shell only through env
+
+
+def test_codecov_uploads_only_with_a_token_and_says_so_without_one():
+    # Codecov is on by default, so a repo that has not added CODECOV_TOKEN yet must neither fail
+    # nor spam upload errors: the uploads are skipped and one notice says how to enable them.
+    job = _jobs()["test"]
+    assert job["env"]["HAS_CODECOV_TOKEN"] == "${{ secrets.CODECOV_TOKEN != '' }}"
+    for name in ("Upload coverage to Codecov", "Upload test results to Codecov"):
+        step = _step("test", name)
+        assert "env.HAS_CODECOV_TOKEN == 'true'" in step["if"], name
+        assert "!cancelled()" in step["if"], name
+    notice = _step("test", "Codecov token missing")
+    assert "env.HAS_CODECOV_TOKEN != 'true'" in notice["if"]
+    assert "::notice" in notice["run"] and "CODECOV_TOKEN" in notice["run"]
