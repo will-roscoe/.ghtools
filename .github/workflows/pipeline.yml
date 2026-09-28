@@ -9,6 +9,9 @@ on:
     secrets:
       CODECOV_TOKEN:
         required: false
+      DEPS_TOKEN:
+        description: read-only token for private GitHub git dependencies (ci.private-deps)
+        required: false
     outputs:
       dispatch:
         description: JSON list of workflow files commit directives asked to start
@@ -123,6 +126,16 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+      - name: Access to private git dependencies
+        # Set only when ci.private-deps is on (the stub passes DEPS_TOKEN): pip then fetches
+        # private GitHub dependencies through it. Both URL forms are rewritten.
+        env:
+          DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+        run: |
+          if [ -n "$DEPS_TOKEN" ]; then
+            git config --global url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"
+            git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
+          fi
       - name: Install
         env:
           SUBPROJECT: ${{ matrix.subproject }}
@@ -323,6 +336,16 @@ jobs:
             mapfile -t pkgs <<<"$pkgs_out"
             sudo apt-get update -qq
             sudo apt-get install -y -qq "${pkgs[@]}"
+          fi
+      - name: Access to private git dependencies
+        # Set only when ci.private-deps is on (the stub passes DEPS_TOKEN): pip then fetches
+        # private GitHub dependencies through it. Both URL forms are rewritten.
+        env:
+          DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+        run: |
+          if [ -n "$DEPS_TOKEN" ]; then
+            git config --global url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"
+            git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
           fi
       - name: Install
         run: ghtools docs install

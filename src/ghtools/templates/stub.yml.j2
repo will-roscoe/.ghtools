@@ -25,6 +25,9 @@ jobs:
       dry-run: ${{ inputs.dry-run || false }}
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+[% if private_deps %]
+      DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+[% endif %]
 [% if pypi %]
   # PyPI only accepts uploads from a workflow file in this repository, so this job lives here.
   publish-pypi:

@@ -94,13 +94,20 @@ def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str,
     return list(gates.values())
 
 
-def render_stub(branch: str, pypi: bool, ref: str = STUB_REF, dispatch: bool = False) -> str:
+def render_stub(
+    branch: str,
+    pypi: bool,
+    ref: str = STUB_REF,
+    dispatch: bool = False,
+    private_deps: bool = False,
+) -> str:
     return render(
         "stub.yml.j2",
         branch=branch,
         pypi=pypi,
         ref=ref,
         dispatch=dispatch,
+        private_deps=private_deps,
         stub_version=STUB_VERSION,  # read at call time, so the marker always follows the constant
     )
 
@@ -182,6 +189,7 @@ def current_stub(root: Path) -> str:
         "pypi" in cfg.get("release.publish"),
         pin.group(1) if pin else STUB_REF,
         dispatch=bool(cfg.get("directives.dispatch")),
+        private_deps=cfg.get("ci.private-deps"),
     )
 
 
@@ -336,7 +344,11 @@ def make_plan(
     plan.write[CONFIG_PATH] = dump_toml(d.values, d.evidence)
     pypi = "pypi" in cfg.get("release.publish")
     plan.write[STUB_PATH] = render_stub(
-        cfg.get("branch"), pypi, ref, dispatch=bool(cfg.get("directives.dispatch"))
+        cfg.get("branch"),
+        pypi,
+        ref,
+        dispatch=bool(cfg.get("directives.dispatch")),
+        private_deps=cfg.get("ci.private-deps"),
     )
     if not keep_old:
         removed = [s for s in REPLACED_SCRIPTS if (root / s).is_file()]

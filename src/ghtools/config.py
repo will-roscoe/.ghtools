@@ -60,6 +60,7 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "gates": Field(list, ["ruff", "ruff-format"]),
         "docker": Field(bool, False),
         "setup": Field(list, []),  # commands run after install, before gates and tests
+        "private-deps": Field(bool, False),  # DEPS_TOKEN reads private GitHub git dependencies
     },
     "ci.coverage": {
         "package": Field(str, ""),
