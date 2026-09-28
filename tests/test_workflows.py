@@ -169,7 +169,7 @@ def test_config_job_can_see_a_pending_resume():
 
 def test_hacs_jobs_use_the_configured_python():
     # Review I7: ios2ha-camera-hass needs 3.14; a hardcoded 3.13 breaks its install.
-    for job in ("hacs-lint", "hacs-test"):
+    for job in ("hacs-test",):
         setup = next(s for s in _jobs()[job]["steps"] if "setup-python" in s.get("uses", ""))
         assert "python_latest" in setup["with"]["python-version"]
 
@@ -195,7 +195,7 @@ def test_status_gets_a_version_only_when_one_was_released():
 
 def test_status_recording_never_fails_ci():
     # Review I9: a crash while recording status must not fail the test or docs job.
-    for job in ("test", "docs"):
+    for job in ("test", "docs", "hacs-test", "lint"):
         record = [
             s
             for s in _jobs()[job]["steps"]
@@ -379,3 +379,22 @@ def test_codecov_uploads_only_with_a_token_and_says_so_without_one():
     notice = _step("test", "Codecov token missing")
     assert "env.HAS_CODECOV_TOKEN != 'true'" in notice["if"]
     assert "::notice" in notice["run"] and "CODECOV_TOKEN" in notice["run"]
+
+
+def test_hacs_and_lint_jobs_report_status():
+    # Without a leg, HACS, lint-only and umbrella repos published no tests/lint card rows or
+    # badges. HACS runs its gates in the test job so one leg carries both results.
+    jobs = _jobs()
+    assert "hacs-lint" not in jobs
+    hacs = jobs["hacs-test"]
+    names = [s.get("name") for s in hacs["steps"]]
+    assert names.index("Gates") < names.index("Test") < names.index("Record status leg")
+    assert _step("hacs-test", "Test")["if"] == "${{ !cancelled() }}"
+    assert "--canonical" in _step("hacs-test", "Record status leg")["run"]
+    lint = _step("lint", "Record status leg")["run"]
+    assert "--lint-only" in lint
+    for job in ("hacs-test", "lint"):
+        upload = next(s for s in jobs[job]["steps"] if "upload-artifact" in s.get("uses", ""))
+        assert upload["with"]["name"].startswith("ghtools-status-leg-"), job
+    for job in ("release", "status"):
+        assert "hacs-lint" not in jobs[job]["needs"], job

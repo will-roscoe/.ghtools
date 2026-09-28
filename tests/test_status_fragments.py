@@ -241,3 +241,28 @@ def test_a_subproject_dropped_from_the_settings_is_not_carried():
     previous = fr.ci_fragment([_sub_leg("old", "success", 1)], [], in_tree=["old"])
     now = fr.ci_fragment([_sub_leg("a", "success", 1)], [], previous=previous, in_tree=["a"])
     assert [s["name"] for s in now["subprojects"]] == ["a"]
+
+
+def _lint_leg(outcome):
+    empty = {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "duration_s": 0.0}
+    return fr.leg(
+        "3.12", "ubuntu-latest", outcome, outcome, empty, None, False, None, lint_only=True
+    )
+
+
+def test_a_lint_only_leg_reports_lint_and_nothing_else():
+    # Lint-profile repos (bash-helpers) run gates but no tests: the card and badges get a lint
+    # result, and no empty test count, Python row or build matrix.
+    frag = fr.ci_fragment([_lint_leg("success")], gates=["make-lint"])
+    assert frag["lint"] == {"status": "passing", "gates": ["make-lint"]}
+    assert frag["tests"]["total"] == 0
+    assert frag["python"] == [] and frag["builds"] == {}
+    assert fr.ci_fragment([_lint_leg("failure")], gates=[])["lint"]["status"] == "failing"
+
+
+def test_an_umbrellas_lint_comes_from_its_lint_only_leg():
+    legs = [_sub_leg("scrapetool", "success", 3), _lint_leg("success")]
+    frag = fr.ci_fragment(legs, gates=[], in_tree=["scrapetool"])
+    assert frag["lint"]["status"] == "passing"
+    assert frag["tests"]["passed"] == 3  # still the subprojects' sum
+    assert frag["python"] == [{"version": "3.12", "status": "passing"}]

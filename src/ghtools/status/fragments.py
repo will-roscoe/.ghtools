@@ -109,7 +109,10 @@ def leg(
     canonical: bool,
     docstrings: float | None,
     subproject: str = "",
+    lint_only: bool = False,
 ) -> dict[str, Any]:
+    """One CI leg's results. A lint-only leg (the lint job of lint-only and umbrella repos) ran
+    gates and no tests: it supplies the lint result and nothing else."""
     return {
         "python": python,
         "runner": runner,
@@ -120,6 +123,7 @@ def leg(
         "canonical": canonical,
         "docstrings": docstrings,
         "subproject": subproject,
+        "lint_only": lint_only,
     }
 
 
@@ -140,6 +144,8 @@ def ci_fragment(
     didn't select, so the card shows each one's latest result instead of flapping."""
     if not legs:
         return {}
+    lint_leg = next((lg for lg in legs if lg.get("lint_only")), None)
+    legs = [lg for lg in legs if not lg.get("lint_only")]
     # Root legs only: in an umbrella the first matrix leg is some subproject.
     root_legs = [lg for lg in legs if not lg.get("subproject")]
     canonical = next((lg for lg in root_legs if lg.get("canonical")), None) or (
@@ -174,6 +180,8 @@ def ci_fragment(
         tests = _sum_tests([r["tests"] for r in merged.values()])
         coverage = docstrings = None
         lint = "unknown"
+    if lint_leg and lint in ("unknown", ""):
+        lint = lint_leg["gates"] or "unknown"
     fragment = {
         "source": "ci",
         "updated": _now(),
