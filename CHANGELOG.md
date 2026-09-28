@@ -6,6 +6,13 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-28
+
+### Features
+
+- **codecov**: render .github/codecov.yml from [ci.coverage], allowing a 2-point drop by default
+- **codecov**: upload only when code changed, not for docs or settings changes
+
 ## [1.4.0] - 2026-09-28
 
 ### Features
