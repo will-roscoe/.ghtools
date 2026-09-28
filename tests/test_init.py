@@ -480,3 +480,18 @@ def test_init_names_tests_that_load_a_removed_script_by_path(git_repo):
     )
     plan, _ = scaffold.make_plan(git_repo.path, {}, False, "none", "v1")
     assert any("tests/unit/test_changelog_finalize.py" in n for n in plan.notes)
+
+
+def test_stub_passes_the_deps_token_only_when_private_deps_are_on(git_repo):
+    # videoapp_ng installs the private scrapetool; other repos' stubs must stay unchanged.
+    assert "DEPS_TOKEN" not in scaffold.render_stub("main", pypi=False)
+    stub = yaml.safe_load(scaffold.render_stub("main", pypi=False, private_deps=True))
+    assert stub["jobs"]["pipeline"]["secrets"]["DEPS_TOKEN"] == "${{ secrets.DEPS_TOKEN }}"
+    git_repo.commit(
+        "ci: a",
+        {
+            ".github/ghtools.toml": "[ci]\nprivate-deps = true\n",
+            ".github/workflows/ghtools.yml": scaffold.render_stub("main", pypi=False),
+        },
+    )
+    assert "DEPS_TOKEN" in scaffold.current_stub(git_repo.path)

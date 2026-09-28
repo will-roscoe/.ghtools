@@ -125,7 +125,7 @@ def test_pipeline_contract_matches_the_stub():
     call = doc[True]["workflow_call"]
     assert set(call["outputs"]) == {"released", "tag", "version", "dist-artifact", "dispatch"}
     assert set(call["inputs"]) == {"dry-run"}
-    assert set(call["secrets"]) == {"CODECOV_TOKEN"}
+    assert set(call["secrets"]) == {"CODECOV_TOKEN", "DEPS_TOKEN"}
     stub = yaml.safe_load(render_stub("main", pypi=True))
     assert set(stub["jobs"]["pipeline"]["with"]) <= set(call["inputs"])
     assert set(stub["jobs"]["pipeline"]["secrets"]) <= set(call["secrets"])
@@ -354,3 +354,14 @@ def test_setup_runs_for_root_legs_too():
     assert "if" not in step  # root legs run ci.setup; subproject legs run their own setup
     names = [s.get("name") for s in _jobs()["test"]["steps"]]
     assert names.index("Setup") > names.index("Install")
+
+
+def test_private_dependency_access_comes_before_install_via_env_only():
+    call = yaml.safe_load(PIPELINE.read_text())[True]["workflow_call"]
+    assert call["secrets"]["DEPS_TOKEN"]["required"] is False
+    for job in ("test", "docs"):
+        names = [s.get("name") for s in _jobs()[job]["steps"]]
+        assert names.index("Access to private git dependencies") < names.index("Install"), job
+        step = _step(job, "Access to private git dependencies")
+        assert step["env"]["DEPS_TOKEN"] == "${{ secrets.DEPS_TOKEN }}"
+        assert "${{" not in step["run"]  # the token reaches the shell only through env

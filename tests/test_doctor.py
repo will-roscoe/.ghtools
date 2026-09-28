@@ -140,3 +140,11 @@ def test_dispatch_needs_actions_write_and_a_dispatchable_workflow(tmp_path):
     assert any("stub has no dispatch job" in m for m in fails)
     assert any("update-todo.yml does not exist" in m for m in fails)
     assert any("nightly.yml has no workflow_dispatch trigger" in m for m in warns)
+
+
+def test_private_deps_need_the_deps_token_secret(tmp_path):
+    _setup(tmp_path)
+    with (tmp_path / ".github/ghtools.toml").open("a") as f:
+        f.write("[ci]\nprivate-deps = true\n")
+    fails = [f.message for f in doctor.run_checks(tmp_path, FakeGh(GOOD)) if f.level == "fail"]
+    assert any("DEPS_TOKEN" in m for m in fails)

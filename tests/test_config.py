@@ -349,3 +349,8 @@ def test_dispatch_names_and_files_are_strict(dispatch, message):
     # Review F-M3/M4: dispatch.yml word-splits file names; `-full` forms are built-in directives.
     with pytest.raises(ConfigError, match=message):
         config.from_dict({"directives": {"dispatch": dispatch}})
+
+
+def test_private_deps_setting():
+    assert config.from_dict({}).get("ci.private-deps") is False
+    assert config.from_dict({"ci": {"private-deps": True}}).get("ci.private-deps") is True

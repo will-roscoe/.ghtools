@@ -159,6 +159,18 @@ def run_checks(root: Path, gh: GhJson = gh_json) -> list[Finding]:
         return out
     name = repo["nameWithOwner"]
 
+    if cfg.get("ci.private-deps"):
+        names = {s.get("name") for s in gh(["secret", "list", "--json", "name"]) or []}
+        if "DEPS_TOKEN" not in names:
+            out.append(
+                Finding(
+                    "fail",
+                    "ci.private-deps is on but the DEPS_TOKEN secret is missing: create a "
+                    "fine-grained token with Contents: read on the private dependencies and add it "
+                    "(gh secret set DEPS_TOKEN)",
+                )
+            )
+
     if cfg.get("ci.coverage.codecov"):
         names = {s.get("name") for s in gh(["secret", "list", "--json", "name"]) or []}
         if "CODECOV_TOKEN" not in names:
