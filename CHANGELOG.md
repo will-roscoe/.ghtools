@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-28
+
+### Features
+
+- **ci**: Codecov uploads are on by default, and skipped with a notice until a repo has a token
+
 ## [1.2.0] - 2026-09-28
 
 ### Features
