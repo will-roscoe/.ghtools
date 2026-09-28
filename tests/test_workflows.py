@@ -398,3 +398,17 @@ def test_hacs_and_lint_jobs_report_status():
         assert upload["with"]["name"].startswith("ghtools-status-leg-"), job
     for job in ("release", "status"):
         assert "hacs-lint" not in jobs[job]["needs"], job
+
+
+def test_codecov_uploads_only_when_code_changed():
+    config_job = _jobs()["config"]
+    assert config_job["outputs"]["code-changed"] == "${{ steps.code.outputs.code-changed }}"
+    step = next(s for s in config_job["steps"] if s.get("id") == "code")
+    assert "github.event.pull_request.base.sha" in str(step["env"])
+    assert "ghtools ci code-changed" in step["run"]
+    for name in (
+        "Upload coverage to Codecov",
+        "Upload test results to Codecov",
+        "Codecov token missing",
+    ):
+        assert "needs.config.outputs.code-changed == 'true'" in _step("test", name)["if"], name
