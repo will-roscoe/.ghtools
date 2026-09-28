@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-28
+
+### Features
+
+- **ci**: ci.private-deps lets CI install private GitHub git dependencies through a DEPS_TOKEN secret
+
 ## [1.1.0] - 2026-09-28
 
 ### Features
