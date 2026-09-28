@@ -35,6 +35,7 @@ BUILTIN: dict[str, GateSpec] = {
     "ruff-format": GateSpec("ruff-format", "ruff format --check .", pip=("ruff",)),
     "interrogate": GateSpec("interrogate", "interrogate -c pyproject.toml", pip=("interrogate",)),
     "readme-sync": GateSpec("readme-sync", "ghtools readme sync --check"),
+    "codecov-sync": GateSpec("codecov-sync", "ghtools codecov --check"),
     "shellcheck": GateSpec(
         "shellcheck", "git ls-files -z '*.sh' '*.bash' | xargs -0 -r shellcheck -S warning"
     ),

@@ -15,7 +15,7 @@ python = ["3.11", "3.12", "3.13"]
 install = "-e .[dev]"
 test = "pytest -q"
 paths = ["**.py", "pyproject.toml", ".github/**", "src/ghtools/templates/**"]
-gates = ["ruff", "ruff-format", "actionlint"]
+gates = ["ruff", "ruff-format", "actionlint", "codecov-sync"]
 
 [ci.coverage]
 package = "src/ghtools"

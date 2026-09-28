@@ -623,6 +623,37 @@ def _status_commands(sub: Any) -> None:
     url.set_defaults(handler=_cmd_status_url)
 
 
+def _cmd_codecov(args: Any) -> int:
+    from . import codecov
+    from .errors import CheckFailed
+
+    root = repo_dir(args)
+    cfg = _config.load(root)
+    changed = codecov.sync(root, cfg, write=args.write)
+    others = codecov.other_configs(root) if cfg.get("ci.coverage.codecov") else []
+    if others:
+        msg = (
+            f"{', '.join(others)} also configures Codecov and can take precedence over "
+            f"{codecov.PATH}; move its settings into [ci.coverage] and delete it"
+        )
+        if args.check:
+            raise CheckFailed(msg)
+        print(f"WARNING: {msg}")
+    if args.check and changed:
+        raise CheckFailed(f"{codecov.PATH} is out of date (run: ghtools codecov --write)")
+    print(f"wrote {codecov.PATH}" if changed and args.write else f"{codecov.PATH} in sync")
+    return 0
+
+
+@registrar
+def _codecov_commands(sub: Any) -> None:
+    p = sub.add_parser("codecov", help="check or write .github/codecov.yml from [ci.coverage]")
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--write", action="store_true")
+    p.set_defaults(handler=_cmd_codecov)
+
+
 def _cmd_readme_sync(args: Any) -> int:
     from . import readme
     from .errors import CheckFailed
