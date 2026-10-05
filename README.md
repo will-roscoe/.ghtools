@@ -1,5 +1,3 @@
-# ghtools
-
 <img src="https://github.com/will-roscoe/.ghtools/raw/ghtools-status/status.svg" alt="ghtools status" width="900">
 
 Shared GitHub tooling for will-roscoe's repositories. CI, Conventional-Commit releases, docs
