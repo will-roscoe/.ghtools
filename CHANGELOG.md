@@ -6,6 +6,16 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-09
+
+### Features
+
+- **codecov**: upload from one test leg per run, at most once a day by default
+
+### Documentation
+
+- **readme**: drop the title heading above the status card
+
 ## [1.5.0] - 2026-09-28
 
 ### Features
