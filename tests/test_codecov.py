@@ -94,3 +94,42 @@ def test_codecov_sync_gate_is_builtin():
 
     assert BUILTIN["codecov-sync"].run == "ghtools codecov --check"
     config.from_dict({"ci": {"gates": ["codecov-sync"]}})  # accepted
+
+
+PREFIX = "ghtools-codecov-root-2026-10-09-"
+
+
+@pytest.mark.parametrize(
+    ("matched", "limit", "want"),
+    [
+        ("", 1, (True, PREFIX + "1")),  # first upload today
+        (PREFIX + "1", 1, (False, "")),  # the default: one a day
+        (PREFIX + "1", 3, (True, PREFIX + "2")),
+        (PREFIX + "3", 3, (False, "")),
+        (PREFIX + "12", 20, (True, PREFIX + "13")),
+        ("ghtools-codecov-root-2026-10-08-1", 1, (True, PREFIX + "1")),  # yesterday's
+        (PREFIX + "x", 1, (True, PREFIX + "1")),  # not a count: no upload recorded
+        (PREFIX + "5", 0, (True, "")),  # no limit: upload, record nothing
+    ],
+)
+def test_quota_counts_todays_uploads_from_the_newest_key(matched, limit, want):
+    assert codecov.quota(PREFIX, matched, limit) == want
+
+
+def test_uploads_per_day_defaults_to_one_and_rejects_negatives():
+    assert config.from_dict({}).get("ci.coverage.uploads-per-day") == 1
+    with pytest.raises(ConfigError):
+        config.from_dict({"ci": {"coverage": {"uploads-per-day": -1}}})
+
+
+def test_cli_quota_writes_outputs_and_explains_a_skip(git_repo, tmp_path, monkeypatch, capsys):
+    git_repo.commit("feat: a", {".github/ghtools.toml": ""})
+    out = tmp_path / "github_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    args = ["-C", str(git_repo.path), "ci", "codecov-quota", "--prefix", PREFIX]
+    assert main([*args, "--github-output"]) == 0
+    assert out.read_text() == f"upload=true\nkey={PREFIX}1\n"
+    out.write_text("")
+    assert main([*args, "--matched", PREFIX + "1", "--github-output"]) == 0
+    assert out.read_text() == "upload=false\nkey=\n"
+    assert "::notice title=Codecov upload skipped::" in capsys.readouterr().out

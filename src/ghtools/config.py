@@ -68,7 +68,12 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "codecov": Field(bool, True),  # uploads need a CODECOV_TOKEN secret; skipped without one
         # .github/codecov.yml: how far project coverage may drop (in points) before Codecov fails
         "threshold": Field(float, 2.0),
+        # One test leg uploads per run (plus one per subproject), so "python-version" names only
+        # the canonical leg's version.
         "flags": Field(str, "python-version", _c("python-version", "subproject", "none")),
+        # Runs per UTC day that upload coverage and test results, per subproject; 0 = no limit.
+        # Counted per branch: a PR also sees what the default branch uploaded today.
+        "uploads-per-day": Field(int, 1),
     },
     "docs": {
         "enabled": Field(bool, False),
@@ -307,6 +312,8 @@ def _cross_checks(cfg: Config) -> None:
             raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
     if cfg.get("ci.coverage.threshold") < 0:
         raise ConfigError("ci.coverage.threshold: must not be negative")
+    if cfg.get("ci.coverage.uploads-per-day") < 0:
+        raise ConfigError("ci.coverage.uploads-per-day: must not be negative")
     for i, row in enumerate(cfg.get("ci.coverage.component")):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", row["id"]):
             raise ConfigError(

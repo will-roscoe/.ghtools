@@ -40,6 +40,20 @@ the workflows ghtools replaces. `ghtools deinit` undoes it.
 | `ghtools readme sync --check` / `--write` | check or regenerate README blocks (`[[readme.block]]`) from their single source |
 | `ghtools codecov --check` / `--write` | check or write `.github/codecov.yml` from `[ci.coverage]` (project may drop `threshold` points, default 2; patch is informational; `[[ci.coverage.component]]` rows become Codecov components) |
 
+## Codecov uploads
+
+Each upload counts against the Codecov plan's monthly allowance, so a run uploads coverage and test
+results from one test leg (the first, plus one per subproject), and only when code under
+`ci.paths` changed. `ci.coverage.uploads-per-day` (default 1, `0` = no limit) caps the runs that
+upload per UTC day, counted separately for each subproject. The count is kept in Actions cache
+entries, which are per branch: a pull request sees what the default branch uploaded today, but
+not the other way round.
+
+```toml
+[ci.coverage]
+uploads-per-day = 3
+```
+
 ## Commit directives
 
 Off by default. With `[directives] enabled = true`, tokens in the commits pushed to the default

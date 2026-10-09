@@ -288,6 +288,23 @@ def _cmd_ci_code_changed(args: Any) -> int:
     return 0
 
 
+def _cmd_ci_codecov_quota(args: Any) -> int:
+    from . import codecov
+
+    limit = _config.load(repo_dir(args)).get("ci.coverage.uploads-per-day")
+    upload, key = codecov.quota(args.prefix, args.matched, limit)
+    if not upload:
+        print(
+            f"::notice title=Codecov upload skipped::Already uploaded {limit} time(s) today (UTC); "
+            "the limit is ci.coverage.uploads-per-day in .github/ghtools.toml (0 = no limit)."
+        )
+    if args.github_output:
+        write_github_output({"upload": str(upload).lower(), "key": key})
+    else:
+        print(json.dumps({"upload": upload, "key": key}))
+    return 0
+
+
 def _cmd_ci_setup(args: Any) -> int:
     from . import ci
 
@@ -337,6 +354,13 @@ def _ci_commands(sub: Any) -> None:
     )
     cc.add_argument("--base", default="")
     cc.set_defaults(handler=_cmd_ci_code_changed)
+    q = cs.add_parser(
+        "codecov-quota", help="may this run upload to Codecov today? (ci.coverage.uploads-per-day)"
+    )
+    q.add_argument("--prefix", required=True, help="today's cache key prefix for this scope")
+    q.add_argument("--matched", default="", help="the newest cache key found for --prefix")
+    q.add_argument("--github-output", action="store_true")
+    q.set_defaults(handler=_cmd_ci_codecov_quota)
     m = cs.add_parser("matrix", help="the CI matrix for this change, as one JSON line")
     m.add_argument("--base", default="")
     m.add_argument("--head", default="HEAD")

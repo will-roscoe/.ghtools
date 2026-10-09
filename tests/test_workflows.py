@@ -372,7 +372,7 @@ def test_codecov_uploads_only_with_a_token_and_says_so_without_one():
     # nor spam upload errors: the uploads are skipped and one notice says how to enable them.
     job = _jobs()["test"]
     assert job["env"]["HAS_CODECOV_TOKEN"] == "${{ secrets.CODECOV_TOKEN != '' }}"
-    for name in ("Upload coverage to Codecov", "Upload test results to Codecov"):
+    for name in ("Codecov uploads today", "Codecov daily limit"):
         step = _step("test", name)
         assert "env.HAS_CODECOV_TOKEN == 'true'" in step["if"], name
         assert "!cancelled()" in step["if"], name
@@ -406,9 +406,41 @@ def test_codecov_uploads_only_when_code_changed():
     step = next(s for s in config_job["steps"] if s.get("id") == "code")
     assert "github.event.pull_request.base.sha" in str(step["env"])
     assert "ghtools ci code-changed" in step["run"]
-    for name in (
+    for name in ("Codecov uploads today", "Codecov daily limit", "Codecov token missing"):
+        assert "needs.config.outputs.code-changed == 'true'" in _step("test", name)["if"], name
+
+
+def test_one_leg_uploads_to_codecov_at_most_uploads_per_day_times():
+    # Every upload counts against the Codecov plan's monthly allowance: one leg per run (the first,
+    # or each subproject's), and only while today's count for that scope is under the limit.
+    jobs = _jobs()
+    assert jobs["config"]["outputs"]["codecov-day"] == "${{ steps.code.outputs.day }}"
+    assert "date -u +%F" in next(s for s in jobs["config"]["steps"] if s.get("id") == "code")["run"]
+    quota_prefix = jobs["test"]["env"]["CODECOV_QUOTA"]
+    assert "matrix.subproject || 'root'" in quota_prefix
+    assert "needs.config.outputs.codecov-day" in quota_prefix
+    names = [s.get("name") for s in jobs["test"]["steps"]]
+    order = [
+        "Test",
+        "Codecov uploads today",
+        "Codecov daily limit",
         "Upload coverage to Codecov",
         "Upload test results to Codecov",
-        "Codecov token missing",
-    ):
-        assert "needs.config.outputs.code-changed == 'true'" in _step("test", name)["if"], name
+        "Record the Codecov upload",
+    ]
+    assert [names.index(n) for n in order] == sorted(names.index(n) for n in order)
+    lookup = _step("test", "Codecov uploads today")
+    assert "(strategy.job-index == 0 || matrix.subproject)" in lookup["if"]
+    assert lookup["with"]["lookup-only"] is True
+    assert lookup["with"]["restore-keys"] == "${{ env.CODECOV_QUOTA }}"
+    limit = _step("test", "Codecov daily limit")
+    assert limit["if"] == lookup["if"]
+    assert "ghtools ci codecov-quota" in limit["run"] and "--github-output" in limit["run"]
+    for name in ("Upload coverage to Codecov", "Upload test results to Codecov"):
+        assert "steps.quota.outputs.upload == 'true'" in _step("test", name)["if"], name
+    record = _step("test", "Record the Codecov upload")
+    assert record["uses"].startswith("actions/cache/save@")
+    assert record["with"]["key"] == "${{ steps.quota.outputs.key }}"
+    assert record["with"]["path"] == lookup["with"]["path"]  # the path is part of the cache version
+    assert record["continue-on-error"] is True
+    assert "steps.quota.outputs.key != ''" in record["if"]
