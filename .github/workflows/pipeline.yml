@@ -38,6 +38,7 @@ jobs:
       would-release: ${{ steps.decide.outputs.released || 'false' }}
       run-ci: ${{ steps.paths.outputs.run-ci }}
       code-changed: ${{ steps.code.outputs.code-changed }}
+      codecov-day: ${{ steps.code.outputs.day }}
       matrix: ${{ steps.matrix.outputs.matrix }}
       any: ${{ steps.matrix.outputs.any }}
       dispatch: ${{ steps.directives.outputs.dispatch || '[]' }}
@@ -94,11 +95,13 @@ jobs:
         id: code
         # Codecov uploads only for code changes (ci.paths), so docs and settings changes neither
         # upload nor get a coverage status. A PR compares with its base, a push with the old head.
+        # The day (UTC) is fixed here so every leg counts ci.coverage.uploads-per-day against it.
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           changed="$(ghtools ci code-changed --base "$BASE")"
           echo "code-changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - name: CI matrix for this change
         id: matrix
         env:
@@ -130,6 +133,8 @@ jobs:
     env:
       # Codecov is on by default; until a repo adds the secret its uploads are skipped, not failed.
       HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
+      # Today's uploads are cache entries named this plus a count, one series per subproject.
+      CODECOV_QUOTA: ${{ format('ghtools-codecov-{0}-{1}-', matrix.subproject || 'root', needs.config.outputs.codecov-day) }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
@@ -183,8 +188,29 @@ jobs:
           echo "::notice title=Codecov upload skipped::No CODECOV_TOKEN secret in this repository.
           Add one (Codecov > the repo > Configuration > General) to upload coverage and test
           results, or set ci.coverage.codecov = false in .github/ghtools.toml."
+      # One leg uploads per run: the first, or each subproject's own. Every upload counts against
+      # the Codecov plan's monthly allowance, so ci.coverage.uploads-per-day also caps each day.
+      - name: Codecov uploads today
+        id: quota-lookup
+        if: ${{ !cancelled() && (strategy.job-index == 0 || matrix.subproject) && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' && needs.config.outputs.code-changed == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ghtools-codecov
+          key: ${{ env.CODECOV_QUOTA }}
+          restore-keys: ${{ env.CODECOV_QUOTA }}
+          lookup-only: true
+      - name: Codecov daily limit
+        id: quota
+        if: ${{ !cancelled() && (strategy.job-index == 0 || matrix.subproject) && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' && needs.config.outputs.code-changed == 'true' }}
+        env:
+          MATCHED: ${{ steps.quota-lookup.outputs.cache-matched-key }}
+        run: |
+          ghtools ci codecov-quota --prefix "$CODECOV_QUOTA" --matched "$MATCHED" --github-output
+          mkdir -p "$RUNNER_TEMP/ghtools-codecov"
+          date -u > "$RUNNER_TEMP/ghtools-codecov/uploaded"
       - name: Upload coverage to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' && needs.config.outputs.code-changed == 'true' }}
+        id: upload-coverage
+        if: ${{ !cancelled() && steps.quota.outputs.upload == 'true' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -192,13 +218,23 @@ jobs:
           disable_search: true
           flags: ${{ fromJSON(needs.config.outputs.config).flags == 'subproject' && matrix.subproject || (fromJSON(needs.config.outputs.config).flags == 'python-version' && format('py{0}', matrix.python) || '') }}
       - name: Upload test results to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN == 'true' && needs.config.outputs.code-changed == 'true' }}
+        id: upload-test-results
+        if: ${{ !cancelled() && steps.quota.outputs.upload == 'true' }}
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: junit.xml
           disable_search: true
           flags: ${{ fromJSON(needs.config.outputs.config).flags == 'subproject' && matrix.subproject || (fromJSON(needs.config.outputs.config).flags == 'python-version' && format('py{0}', matrix.python) || '') }}
+      - name: Record the Codecov upload
+        if: >-
+          ${{ !cancelled() && steps.quota.outputs.key != '' &&
+          (steps.upload-coverage.outcome == 'success' || steps.upload-test-results.outcome == 'success') }}
+        continue-on-error: true  # a missed record costs one extra upload, never a failed run
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ghtools-codecov
+          key: ${{ steps.quota.outputs.key }}
       - name: Record status leg
         if: ${{ !cancelled() }}
         continue-on-error: true  # status must never fail CI
