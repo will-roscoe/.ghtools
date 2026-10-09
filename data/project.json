@@ -1,0 +1,14 @@
+{
+  "description": "Shared GitHub tooling for will-roscoe's repositories: CI, releases, docs and status, referenced rather than copied.",
+  "links": {
+    "docs": "",
+    "pypi": "",
+    "repo": "https://github.com/will-roscoe/.ghtools"
+  },
+  "name": "ghtools",
+  "open_issues": 6,
+  "released": "2026-10-09",
+  "source": "project",
+  "updated": "2026-10-09T09:57:37Z",
+  "version": "1.6.0"
+}
