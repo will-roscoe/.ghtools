@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-22
+
+### Features
+
+- **ci**: skip CI on pull requests from listed head branches
+
 ## [1.6.0] - 2026-10-09
 
 ### Features
