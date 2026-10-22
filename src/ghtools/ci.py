@@ -109,6 +109,11 @@ def should_run(cfg: Config, root: Path, base: str | None) -> bool:
     return any(f in _ALWAYS or any(p.match(f) for p in patterns) for f in files)
 
 
+def skips_pr(cfg: Config, head: str) -> bool:
+    """Is `head` (a pull request's head branch) listed in ci.skip-pr-heads?"""
+    return bool(head) and head in cfg.get("ci.skip-pr-heads")
+
+
 def code_changed(cfg: Config, root: Path, base: str | None) -> bool:
     """Did code (ci.paths) change since `base`? Unlike should_run, ghtools's own settings and
     stub don't count: they run CI but say nothing about coverage. Unknown base: True."""

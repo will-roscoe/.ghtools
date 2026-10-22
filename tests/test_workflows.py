@@ -444,3 +444,9 @@ def test_one_leg_uploads_to_codecov_at_most_uploads_per_day_times():
     assert record["with"]["path"] == lookup["with"]["path"]  # the path is part of the cache version
     assert record["continue-on-error"] is True
     assert "steps.quota.outputs.key != ''" in record["if"]
+
+
+def test_should_ci_run_step_consults_skip_pr_heads():
+    doc = yaml.safe_load(PIPELINE.read_text())
+    step = next(s for s in doc["jobs"]["config"]["steps"] if s.get("id") == "paths")
+    assert "HEAD_REF" in step["env"] and "ghtools ci skip-pr" in step["run"]

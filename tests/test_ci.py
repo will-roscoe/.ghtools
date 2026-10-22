@@ -168,3 +168,23 @@ def test_code_changed_ignores_docs_and_ghtools_settings(git_repo):
     git_repo.commit("fix: code", {"a.py": "2"})
     assert ci.code_changed(cfg, git_repo.path, base) is True
     assert ci.code_changed(cfg, git_repo.path, None) is True  # unknown base: upload
+
+
+def test_skips_pr_only_for_listed_heads():
+    cfg = config.from_dict({"ci": {"skip-pr-heads": ["next"]}})
+    assert ci.skips_pr(cfg, "next") is True
+    assert ci.skips_pr(cfg, "feat/x") is False
+    assert ci.skips_pr(cfg, "") is False
+
+
+def test_skips_pr_default_skips_nothing():
+    assert config.from_dict({}).get("ci.skip-pr-heads") == []
+    assert ci.skips_pr(config.from_dict({}), "next") is False
+
+
+def test_skip_pr_command_prints_true_false(git_repo, capsys):
+    (git_repo.path / ".github").mkdir(exist_ok=True)
+    (git_repo.path / ".github/ghtools.toml").write_text('[ci]\nskip-pr-heads = ["next"]\n')
+    for head, want in (("next", "true"), ("feat/x", "false")):
+        assert main(["-C", str(git_repo.path), "ci", "skip-pr", "--head", head]) == 0
+        assert capsys.readouterr().out.strip() == want
