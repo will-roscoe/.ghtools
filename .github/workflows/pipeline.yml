@@ -84,8 +84,11 @@ jobs:
           BEFORE: ${{ github.event.before }}
           WOULD_RELEASE: ${{ steps.decide.outputs.released }}
           FORCE_CI: ${{ steps.directives.outputs.force-ci }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          if [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ] || [ "$FORCE_CI" = "true" ]; then
+          if [ "$EVENT" = "pull_request" ] && [ "$(ghtools ci skip-pr --head "$HEAD_REF")" = "true" ]; then
+            echo "run-ci=false" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ] || [ "$FORCE_CI" = "true" ]; then
             echo "run-ci=true" >> "$GITHUB_OUTPUT"
           else
             run_ci="$(ghtools ci should-run --base "$BEFORE")"

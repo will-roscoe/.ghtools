@@ -57,6 +57,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "install": Field(str, "-e .[dev]"),
         "test": Field(str, "pytest -q"),
         "paths": Field(list, ["**.py", "pyproject.toml"]),
+        # Pull requests whose head branch is listed skip CI (tests, gates, docker, lint legs);
+        # their commits were already tested as pull requests into that branch.
+        "skip-pr-heads": Field(list, []),
         "gates": Field(list, ["ruff", "ruff-format"]),
         "docker": Field(bool, False),
         "setup": Field(list, []),  # commands run after install, before gates and tests

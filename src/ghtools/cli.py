@@ -272,6 +272,13 @@ def _cmd_ci_test(args: Any) -> int:
     return _run_checked(command, root, "tests")
 
 
+def _cmd_ci_skip_pr(args: Any) -> int:
+    from . import ci
+
+    print("true" if ci.skips_pr(_config.load(repo_dir(args)), args.head) else "false")
+    return 0
+
+
 def _cmd_ci_should_run(args: Any) -> int:
     from . import ci
 
@@ -349,6 +356,11 @@ def _ci_commands(sub: Any) -> None:
     s = cs.add_parser("should-run", help="does a push since BASE touch ci.paths? (true/false)")
     s.add_argument("--base", default="")
     s.set_defaults(handler=_cmd_ci_should_run)
+    sp = cs.add_parser(
+        "skip-pr", help="is HEAD, a pull request's head branch, in ci.skip-pr-heads? (true/false)"
+    )
+    sp.add_argument("--head", default="")
+    sp.set_defaults(handler=_cmd_ci_skip_pr)
     cc = cs.add_parser(
         "code-changed", help="does the change since BASE touch ci.paths? (true/false)"
     )

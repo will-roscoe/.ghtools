@@ -54,6 +54,17 @@ not the other way round.
 uploads-per-day = 3
 ```
 
+## Skipping CI on pull requests
+
+`ci.skip-pr-heads` (default empty) lists head branches whose pull requests skip CI (tests, gates,
+docker and lint legs), for a release branch whose commits were already tested as pull requests
+into it. Other pull requests and all pushes are unaffected.
+
+```toml
+[ci]
+skip-pr-heads = ["next"]
+```
+
 ## Commit directives
 
 Off by default. With `[directives] enabled = true`, tokens in the commits pushed to the default
