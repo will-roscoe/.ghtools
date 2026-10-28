@@ -60,6 +60,10 @@ SCHEMA: dict[str, dict[str, Field]] = {
         # Pull requests whose head branch is listed skip CI (tests, gates, docker, lint legs);
         # their commits were already tested as pull requests into that branch.
         "skip-pr-heads": Field(list, []),
+        # On a push to the default branch, skip CI when the pushed tree was already tested and
+        # passed on a same-repo pull request (recorded under refs/ghtools/tested/); the recorded
+        # results still feed the status card.
+        "reuse-pr-results": Field(bool, False),
         "gates": Field(list, ["ruff", "ruff-format"]),
         "docker": Field(bool, False),
         "setup": Field(list, []),  # commands run after install, before gates and tests
@@ -87,6 +91,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "strict": Field(bool, True),
         "pages": Field(bool, False),
         "apt": Field(list, []),
+        # Path globs (like ci.paths). When set, the docs job runs only if the change (a pull
+        # request against its base, a push since its old head) touches one; empty = every run.
+        "paths": Field(list, []),
         "prebuild": Field(list, []),  # commands run before sphinx-build (e.g. generated sources)
     },
     "status": {
@@ -447,6 +454,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "codecov": cfg.get("ci.coverage.codecov"),
         "flags": cfg.get("ci.coverage.flags"),
         "docker": cfg.get("ci.docker"),
+        "reuse": cfg.get("ci.reuse-pr-results"),
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
         "status": {"enabled": cfg.get("status.enabled")},
         "subprojects": bool(in_tree(cfg)),

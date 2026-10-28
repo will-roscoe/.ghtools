@@ -279,6 +279,40 @@ def _cmd_ci_skip_pr(args: Any) -> int:
     return 0
 
 
+def _cmd_ci_docs_changed(args: Any) -> int:
+    from . import ci
+
+    root = repo_dir(args)
+    print("true" if ci.docs_changed(_config.load(root), root, args.base) else "false")
+    return 0
+
+
+def _cmd_ci_record_tested(args: Any) -> int:
+    from . import reuse
+
+    print(reuse.record(repo_dir(args), Path(args.legs)))
+    return 0
+
+
+def _cmd_ci_reuse(args: Any) -> int:
+    from . import reuse
+
+    root = repo_dir(args)
+    matrix = json.loads(args.matrix)
+    if reuse.lookup(root, Path(args.out), matrix):
+        print("true")
+    else:
+        print("false")
+    return 0
+
+
+def _cmd_ci_drop_tested(args: Any) -> int:
+    from . import reuse
+
+    reuse.drop(repo_dir(args))
+    return 0
+
+
 def _cmd_ci_should_run(args: Any) -> int:
     from . import ci
 
@@ -361,6 +395,24 @@ def _ci_commands(sub: Any) -> None:
     )
     sp.add_argument("--head", default="")
     sp.set_defaults(handler=_cmd_ci_skip_pr)
+    dc = cs.add_parser(
+        "docs-changed", help="should the docs job run for the change since BASE? (true/false)"
+    )
+    dc.add_argument("--base", default="")
+    dc.set_defaults(handler=_cmd_ci_docs_changed)
+    rt = cs.add_parser(
+        "record-tested", help="record HEAD's tree as tested, with the CI legs in --legs"
+    )
+    rt.add_argument("--legs", required=True)
+    rt.set_defaults(handler=_cmd_ci_record_tested)
+    ru = cs.add_parser(
+        "reuse", help="was HEAD's tree already tested by a pull request? (true/false)"
+    )
+    ru.add_argument("--matrix", required=True, help="the CI matrix JSON this run would use")
+    ru.add_argument("--out", required=True, help="directory to write the recorded legs to")
+    ru.set_defaults(handler=_cmd_ci_reuse)
+    dt = cs.add_parser("drop-tested", help="delete the record for HEAD's tree")
+    dt.set_defaults(handler=_cmd_ci_drop_tested)
     cc = cs.add_parser(
         "code-changed", help="does the change since BASE touch ci.paths? (true/false)"
     )

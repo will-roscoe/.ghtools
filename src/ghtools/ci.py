@@ -122,3 +122,15 @@ def code_changed(cfg: Config, root: Path, base: str | None) -> bool:
         return True
     patterns = [glob_to_regex(p) for p in cfg.get("ci.paths")]
     return any(any(p.match(f) for p in patterns) for f in files)
+
+
+def docs_changed(cfg: Config, root: Path, base: str | None) -> bool:
+    """Should the docs job run? With docs.paths empty always; otherwise only if the change since
+    `base` touches one of those globs (or ghtools's own settings or stub). Unknown base: True."""
+    patterns = [glob_to_regex(p) for p in cfg.get("docs.paths")]
+    if not patterns:
+        return True
+    files = changed_files(base or "", root)
+    if files is None:
+        return True
+    return any(f in _ALWAYS or any(p.match(f) for p in patterns) for f in files)

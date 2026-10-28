@@ -65,6 +65,38 @@ into it. Other pull requests and all pushes are unaffected.
 skip-pr-heads = ["next"]
 ```
 
+## Building docs only when relevant
+
+`docs.paths` (default empty = docs build on every run) lists path globs, like `ci.paths`. When
+set, the docs job runs only if the change touches one of them or ghtools's own settings and stub: a
+pull request is compared with its base, a push with its old head. A skipped job counts as passing
+for branch protection, and `docs-deploy` is skipped with it, so the published site stays as it was.
+Pushes to the default branch follow the same rule, so docs are rebuilt and deployed on the push
+that merges a docs-relevant change (a failed deploy is retried by the next such push or a manual
+run, which has no base and always builds). Include the sources the docs import, for autodoc.
+
+```toml
+[docs]
+paths = ["doc/**", "src/**.py", "pyproject.toml"]
+```
+
+## Reusing pull request test results
+
+`ci.reuse-pr-results` (default false) lets the push that merges a pull request skip CI when the
+pushed commit's *tree* already passed. A same-repo pull request run that passes records its merged
+tree and its status legs as `refs/ghtools/tested/<tree>` (a ref, no branch or tag). The push to
+the default branch looks its own tree up there: found, passing, and covering every leg the push
+would run, then tests, lint and docker are skipped, the recorded legs feed the status card and
+badges, and the record is deleted. A different tree (the base moved after the pull request ran, a
+release commit on the default branch) runs everything as usual, as does a `[ci]` directive, a fork
+pull request (read-only token) or any doubt. Codecov is not uploaded for a reused push. Needs
+nothing beyond the stub's existing `contents: write`.
+
+```toml
+[ci]
+reuse-pr-results = true
+```
+
 ## Commit directives
 
 Off by default. With `[directives] enabled = true`, tokens in the commits pushed to the default
@@ -74,7 +106,7 @@ branch act on that pipeline run, written `[name]` or `/name`:
 |---|---|
 | `[ci]`, `[test]`, `[test-full]`, `[lint]`, `[coverage]` (optionally `:py`) | run CI even if no watched path changed |
 | any of those with another language, e.g. `[lint:f2]` | a warning; nothing to run |
-| `[docs]` | a notice: docs already build on every run |
+| `[docs]` | a notice: docs already build on every run (with `docs.paths` set it does not force a build) |
 | a name listed in `dispatch` | start that repository workflow (`gh workflow run`) once the pipeline succeeds |
 
 ```toml
