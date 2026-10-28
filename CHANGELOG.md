@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-28
+
+### Features
+
+- **ci**: docs.paths and ci.reuse-pr-results, both opt-in
+
 ## [1.7.0] - 2026-10-22
 
 ### Features
