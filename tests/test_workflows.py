@@ -450,3 +450,32 @@ def test_should_ci_run_step_consults_skip_pr_heads():
     doc = yaml.safe_load(PIPELINE.read_text())
     step = next(s for s in doc["jobs"]["config"]["steps"] if s.get("id") == "paths")
     assert "HEAD_REF" in step["env"] and "ghtools ci skip-pr" in step["run"]
+
+
+def _pipeline():
+    return yaml.safe_load(PIPELINE.read_text())
+
+
+def test_docs_job_waits_on_docs_paths_check():
+    doc = _pipeline()
+    assert "run-docs" in doc["jobs"]["config"]["outputs"]
+    assert "needs.config.outputs.run-docs == 'true'" in doc["jobs"]["docs"]["if"]
+    step = next(s for s in doc["jobs"]["config"]["steps"] if s.get("id") == "docs-paths")
+    assert "ghtools ci docs-changed" in step["run"]
+
+
+def test_reuse_is_opt_in_and_skips_ci_only_when_reused():
+    doc = _pipeline()
+    config_job = doc["jobs"]["config"]
+    step = next(s for s in config_job["steps"] if s.get("id") == "reuse")
+    assert ").reuse" in step["if"] and "default-ref" in step["if"]
+    assert "force-ci != 'true'" in step["if"]  # a [ci] directive still forces tests
+    assert "reused == 'true' && 'false'" in config_job["outputs"]["run-ci"]
+
+
+def test_record_tested_job_is_same_repo_pr_only_and_never_fails_the_run():
+    job = _pipeline()["jobs"]["record-tested"]
+    assert job["continue-on-error"] is True
+    assert "pull_request.head.repo.full_name == github.repository" in job["if"]
+    assert "reuse" in job["if"] and "tests-passed.result == 'success'" in job["if"]
+    assert job["permissions"] == {"contents": "write"}

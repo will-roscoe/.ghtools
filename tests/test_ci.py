@@ -188,3 +188,30 @@ def test_skip_pr_command_prints_true_false(git_repo, capsys):
     for head, want in (("next", "true"), ("feat/x", "false")):
         assert main(["-C", str(git_repo.path), "ci", "skip-pr", "--head", head]) == 0
         assert capsys.readouterr().out.strip() == want
+
+
+def test_docs_changed_default_always_runs(git_repo):
+    git_repo.commit("feat: a", {"a.py": "1"})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("feat: b", {"a.py": "2"})
+    assert ci.docs_changed(config.from_dict({}), git_repo.path, base) is True
+
+
+def test_docs_changed_follows_docs_paths(git_repo):
+    cfg = config.from_dict({"docs": {"paths": ["docs/**", "src/**.py"]}})
+    git_repo.commit("feat: a", {"a.py": "1"})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("test: t", {"tests/t.py": "1"})
+    assert ci.docs_changed(cfg, git_repo.path, base) is False
+    git_repo.commit("docs: d", {"docs/index.rst": "x"})
+    assert ci.docs_changed(cfg, git_repo.path, base) is True
+    assert ci.docs_changed(cfg, git_repo.path, None) is True  # unknown base: build
+    assert ci.docs_changed(cfg, git_repo.path, "0" * 40) is True
+
+
+def test_docs_changed_runs_for_ghtools_settings(git_repo):
+    cfg = config.from_dict({"docs": {"paths": ["docs/**"]}})
+    git_repo.commit("feat: a", {"a.py": "1"})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("ci: cfg", {".github/ghtools.toml": "branch = 'main'\n"})
+    assert ci.docs_changed(cfg, git_repo.path, base) is True
