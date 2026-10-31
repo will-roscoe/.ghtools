@@ -441,10 +441,15 @@ def load_or_defaults(root: Path) -> Config:
 
 
 def export(cfg: Config) -> dict[str, Any]:
-    """The subset pipeline.yml needs, as one JSON-serialisable object."""
+    """The subset pipeline.yml needs, as one JSON-serialisable object.
+
+    ``matrix.include`` legs have their runner resolved against the shipped python build snapshot
+    (see :mod:`ghtools.runners`); legs no runner can run are omitted.
+    """
+    from .runners import resolve_matrix  # local import: runners imports config
+
     python, runners = cfg.get("ci.python"), cfg.get("ci.runners")
-    include = [{"python": p, "runner": runners[0]} for p in python]
-    include += [{"python": python[-1], "runner": r} for r in runners[1:]]
+    include, _ = resolve_matrix(python, runners)
     publish = cfg.get("release.publish")
     return {
         "profile": cfg.get("profile"),

@@ -65,7 +65,11 @@ def _print_value(value: Any) -> None:
 
 def _cmd_config_check(args: Any) -> int:
     root = repo_dir(args)
-    _config.check_paths(_config.load(root), root)
+    cfg = _config.load(root)
+    _config.check_paths(cfg, root)
+    from .runners import check
+
+    _print_runner_notes([n for n in check(cfg) if n.kind == "warning"])
     print(f"{_config.CONFIG_PATH}: ok")
     return 0
 
@@ -358,11 +362,22 @@ def _cmd_ci_setup(args: Any) -> int:
     return 0
 
 
+def _print_runner_notes(notes: list[Any]) -> None:
+    annotate = os.environ.get("GITHUB_ACTIONS") == "true"
+    for n in notes:
+        text = f"::{n.kind}::{n.message}" if annotate else f"{n.kind}: {n.message}"
+        print(text, file=sys.stderr, flush=True)
+
+
 def _cmd_ci_matrix(args: Any) -> int:
     from .subprojects import matrix
 
     root = repo_dir(args)
-    m, any_legs = matrix(_config.load(root), root, args.base, args.head, force=args.all)
+    notes: list[Any] = []
+    m, any_legs = matrix(
+        _config.load(root), root, args.base, args.head, force=args.all, notes=notes
+    )
+    _print_runner_notes(notes)
     if args.github_output:
         write_github_output(
             {"matrix": json.dumps(m, separators=(",", ":")), "any": str(any_legs).lower()}

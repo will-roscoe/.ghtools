@@ -1,0 +1,31 @@
+{
+  "source": "https://github.com/actions/runner-images#available-images",
+  "checked": "2026-10-31",
+  "aliases": {
+    "ubuntu-latest": "ubuntu-26.04",
+    "macos-latest": "macos-26",
+    "macos-latest-xlarge": "macos-26-xlarge",
+    "macos-latest-large": "macos-26-intel",
+    "windows-latest": "windows-2025"
+  },
+  "families": [
+    {
+      "os": "linux",
+      "pattern": "^ubuntu-(?P<version>\\d+\\.\\d+)(?P<tag>-arm)?$",
+      "arch": {"": "x64", "-arm": "arm64"},
+      "template": "ubuntu-{version}{tag}",
+      "versions": ["22.04", "24.04", "26.04"]
+    },
+    {
+      "os": "darwin",
+      "pattern": "^macos-(?P<version>\\d+)(?P<tag>-intel|-large|-xlarge)?$",
+      "arch": {"": "arm64", "-xlarge": "arm64", "-intel": "x64", "-large": "x64"}
+    },
+    {
+      "os": "win32",
+      "pattern": "^windows-(?P<version>\\d+)(?P<tag>-vs2026-arm|-vs2026|-arm)?$",
+      "arch": {"": "x64", "-vs2026": "x64", "-arm": "arm64", "-vs2026-arm": "arm64"}
+    }
+  ],
+  "rules": []
+}

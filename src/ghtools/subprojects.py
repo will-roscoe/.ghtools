@@ -7,8 +7,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .config import Config, export, in_tree
+from .config import Config, in_tree
 from .gitutil import submodules
+from .runners import Note, resolve_leg, resolve_matrix
 
 GLOBAL = (".github/ghtools.toml", ".github/workflows/ghtools.yml", "pyproject.toml", "codecov.yml")
 
@@ -48,25 +49,42 @@ PLACEHOLDER = {"python": "none", "runner": "ubuntu-latest"}
 
 
 def matrix(
-    cfg: Config, root: Path, base: str, head: str, force: bool = False
+    cfg: Config,
+    root: Path,
+    base: str,
+    head: str,
+    force: bool = False,
+    notes: list[Note] | None = None,
 ) -> tuple[dict[str, Any], bool]:
-    include = list(export(cfg)["matrix"]["include"]) if cfg.get("profile") == "python" else []
+    """The CI matrix and whether it has any real leg; runners are resolved per leg.
+
+    Runner changes and dropped legs are appended to ``notes`` when given.
+    """
+    notes = [] if notes is None else notes
+    include: list[dict[str, Any]] = []
+    if cfg.get("profile") == "python":
+        include, root_notes = resolve_matrix(cfg.get("ci.python"), cfg.get("ci.runners"))
+        notes.extend(root_notes)
     rows = in_tree(cfg)
     if rows:
         # force (a `[ci]` directive): every subproject, as when the diff is unknown.
         picked = select(cfg, None if force else changed_between(Path(root), base, head))
         by_name = {r["name"]: r for r in rows}
-        python, runner = cfg.get("ci.python")[-1], cfg.get("ci.runners")[0]
-        include += [
-            {
-                "python": python,
-                "runner": runner,
-                "subproject": n,
-                "package": by_name[n]["package"],
-                "tests": by_name[n]["tests"],
-            }
-            for n in picked
-        ]
+        python, label = cfg.get("ci.python")[-1], cfg.get("ci.runners")[0]
+        runner, note = resolve_leg(python, label)
+        if note and note not in notes:
+            notes.append(note)
+        if runner is not None:
+            include += [
+                {
+                    "python": python,
+                    "runner": runner,
+                    "subproject": n,
+                    "package": by_name[n]["package"],
+                    "tests": by_name[n]["tests"],
+                }
+                for n in picked
+            ]
     if not include:
         return {"include": [PLACEHOLDER]}, False
     return {"include": include}, True
