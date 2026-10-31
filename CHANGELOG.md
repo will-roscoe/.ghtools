@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-31
+
+### Features
+
+- **ci**: resolve each leg's runner against available python builds (#35)
+
 ## [1.8.0] - 2026-10-28
 
 ### Features
