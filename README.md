@@ -24,6 +24,30 @@ the workflows ghtools replaces. `ghtools deinit` undoes it.
 `src/ghtools/config.py` (`SCHEMA`); `ghtools config check` validates the file, and
 `ghtools init` writes each detected value with a comment naming the evidence.
 
+## Runner resolution
+
+`ghtools ci matrix` pairs each `ci.python` with `ci.runners[0]` (and the newest python with the
+other runners), then checks every leg against the Python builds `actions/setup-python` can
+download. A runner label is parsed to OS, version and architecture (`ubuntu-latest` is looked up
+in `src/ghtools/data/runners.json`, the one hand-kept fact, since GitHub moves the `-latest`
+aliases). If `src/ghtools/data/python_builds.json` has a build for that OS version, the label is
+kept. Otherwise the leg moves to the newest OS version of the same OS and architecture that has
+one, under an explicit label (`3.9` on `ubuntu-latest` runs on `ubuntu-24.04`; on
+`ubuntu-24.04-arm` it stays arm). With no build on any version the leg is dropped with a
+`::warning::skipped: no python X.Y build for os/arch`. `ghtools config check` prints the same
+warnings.
+
+`rules` in `runners.json` cover what the manifest cannot say. A rule applies to legs matching
+`match` (`python`, `os`, `arch`; versions compare numerically, `3.10 > 3.9`) and requires the
+runner's OS version to satisfy `require.version`:
+
+```json
+{"match": {"python": ">=3.15", "os": "darwin"}, "require": {"version": "<=15"}}
+```
+
+Refresh the build snapshot with `python scripts/refresh_python_manifest.py` (fetches
+`actions/python-versions`; the matrix itself never touches the network).
+
 ## Commands
 
 | Command | Does |

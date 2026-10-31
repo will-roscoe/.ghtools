@@ -97,7 +97,7 @@ def test_export_builds_matrix_with_extra_runners_on_newest_python():
     out = config.export(cfg)
     assert out["matrix"] == {
         "include": [
-            {"python": "3.9", "runner": "ubuntu-latest"},
+            {"python": "3.9", "runner": "ubuntu-24.04"},
             {"python": "3.13", "runner": "ubuntu-latest"},
             {"python": "3.13", "runner": "macos-latest"},
         ]
