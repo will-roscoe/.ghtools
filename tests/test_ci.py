@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
-from ghtools import ci, config
+from ghtools import ci, config, reuse
 from ghtools.cli import main
 from ghtools.errors import GhtoolsError
 
@@ -182,12 +184,45 @@ def test_skips_pr_default_skips_nothing():
     assert ci.skips_pr(config.from_dict({}), "next") is False
 
 
-def test_skip_pr_command_prints_true_false(git_repo, capsys):
+def _skip_pr_repo(git_repo, tmp_path):
     (git_repo.path / ".github").mkdir(exist_ok=True)
     (git_repo.path / ".github/ghtools.toml").write_text('[ci]\nskip-pr-heads = ["next"]\n')
-    for head, want in (("next", "true"), ("feat/x", "false")):
-        assert main(["-C", str(git_repo.path), "ci", "skip-pr", "--head", head]) == 0
-        assert capsys.readouterr().out.strip() == want
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "remote.git")], check=True)
+    git_repo.run("remote", "add", "origin", str(tmp_path / "remote.git"))
+    git_repo.commit("feat: a", {"a.py": "1"})
+    return git_repo.run("rev-parse", "HEAD").strip()
+
+
+def _skip_pr(git_repo, head, sha):
+    return main(["-C", str(git_repo.path), "ci", "skip-pr", "--head", head, "--sha", sha])
+
+
+def test_skip_pr_skips_listed_head_whose_tree_is_tested(git_repo, tmp_path, capsys):
+    sha = _skip_pr_repo(git_repo, tmp_path)
+    legs = tmp_path / "legs"
+    legs.mkdir()
+    (legs / "leg.json").write_text('{"status": "passing"}')
+    reuse.record(git_repo.path, legs)
+    assert _skip_pr(git_repo, "next", sha) == 0
+    assert capsys.readouterr().out.strip() == "true"
+    assert _skip_pr(git_repo, "feat/x", sha) == 0
+    assert capsys.readouterr().out.strip() == "false"
+
+
+def test_skip_pr_runs_when_head_tree_was_never_tested(git_repo, tmp_path, capsys):
+    sha = _skip_pr_repo(git_repo, tmp_path)
+    assert _skip_pr(git_repo, "next", sha) == 0
+    cap = capsys.readouterr()
+    assert cap.out.strip() == "false"
+    assert "no refs/ghtools/tested" in cap.err
+
+
+def test_skip_pr_without_sha_runs_tests(git_repo, tmp_path, capsys):
+    _skip_pr_repo(git_repo, tmp_path)
+    assert main(["-C", str(git_repo.path), "ci", "skip-pr", "--head", "next"]) == 0
+    cap = capsys.readouterr()
+    assert cap.out.strip() == "false"
+    assert "no head sha" in cap.err
 
 
 def test_docs_changed_default_always_runs(git_repo):

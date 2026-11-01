@@ -277,9 +277,28 @@ def _cmd_ci_test(args: Any) -> int:
 
 
 def _cmd_ci_skip_pr(args: Any) -> int:
-    from . import ci
+    import sys
 
-    print("true" if ci.skips_pr(_config.load(repo_dir(args)), args.head) else "false")
+    from . import ci, reuse
+
+    root = repo_dir(args)
+    if not ci.skips_pr(_config.load(root), args.head):
+        print("false")
+        return 0
+    # A listed head is skipped only if its exact tree was tested: two PRs merged into it one
+    # after the other leave a tree that was never tested together.
+    if not args.sha:
+        print(f"ghtools: not skipping '{args.head}': no head sha to look up", file=sys.stderr)
+    elif not reuse.is_tested(root, args.sha):
+        print(
+            f"ghtools: not skipping '{args.head}': no {reuse.REF_PREFIX}<tree> ref for the tree "
+            f"of {args.sha[:12]}, running tests",
+            file=sys.stderr,
+        )
+    else:
+        print("true")
+        return 0
+    print("false")
     return 0
 
 
@@ -406,9 +425,11 @@ def _ci_commands(sub: Any) -> None:
     s.add_argument("--base", default="")
     s.set_defaults(handler=_cmd_ci_should_run)
     sp = cs.add_parser(
-        "skip-pr", help="is HEAD, a pull request's head branch, in ci.skip-pr-heads? (true/false)"
+        "skip-pr",
+        help="skip a PR from a ci.skip-pr-heads branch whose tree is tested? (true/false)",
     )
     sp.add_argument("--head", default="")
+    sp.add_argument("--sha", default="", help="the head branch's commit; its tree must be tested")
     sp.set_defaults(handler=_cmd_ci_skip_pr)
     dc = cs.add_parser(
         "docs-changed", help="should the docs job run for the change since BASE? (true/false)"
