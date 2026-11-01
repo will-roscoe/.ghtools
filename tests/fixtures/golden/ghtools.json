@@ -9,6 +9,65 @@
       ".[dev]"
     ]
   },
+  "matrix": {
+    "all (no diff)": [
+      {
+        "include": [
+          {
+            "python": "3.11",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "python": "3.12",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "python": "3.13",
+            "runner": "ubuntu-latest"
+          }
+        ]
+      },
+      true
+    ],
+    "forced": [
+      {
+        "include": [
+          {
+            "python": "3.11",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "python": "3.12",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "python": "3.13",
+            "runner": "ubuntu-latest"
+          }
+        ]
+      },
+      true
+    ],
+    "since tag": [
+      {
+        "include": [
+          {
+            "python": "3.11",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "python": "3.12",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "python": "3.13",
+            "runner": "ubuntu-latest"
+          }
+        ]
+      },
+      true
+    ]
+  },
   "release_decide": {
     "current": "v1.0.0",
     "reason": "v1.0.0 -> v1.1.0",
@@ -18,7 +77,13 @@
     "version": "1.1.0"
   },
   "select": {
+    "empty": [],
+    "global .github/ghtools.toml": [],
+    "global .github/workflows/ghtools.yml": [],
+    "global codecov.yml": [],
+    "global pyproject.toml": [],
     "none": [],
+    "outside every row": [],
     "src/x.py": []
   },
   "setup_commands": {

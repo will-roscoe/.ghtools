@@ -66,6 +66,7 @@ def _try(root: Path, fn: Any) -> Any:
 
 
 def _git(root: Path, *args: str) -> None:
+    """Run git in ``root`` with a fixed identity and dates, raising on failure."""
     env = {
         **os.environ,
         "GIT_AUTHOR_NAME": "T",
@@ -108,6 +109,11 @@ def _throwaway_repo(root: Path, cfg: config.Config) -> None:
         (root / name).write_text(msg)
         _git(root, "add", name)
         _git(root, "commit", "-q", "-m", msg)
+    rows = config.in_tree(cfg)
+    if rows:  # a non-releasing commit touching only the first row, for the diff-based matrix
+        (root / rows[0]["path"] / "touched.py").write_text("x")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "test: touch first row")
 
 
 def _decision(d: release.Decision) -> dict[str, Any]:
@@ -142,9 +148,21 @@ def capture(toml_path: Path, tmp: Path) -> dict[str, Any]:
         "": ci.setup_commands(cfg, None),
         **{n: _try(root, lambda n=n: ci.setup_commands(cfg, n)) for n in names},
     }
+    rows = config.in_tree(cfg)
+    probes: dict[str, list[str] | None] = {"src/x.py": ["src/x.py"], "none": None}
+    for row in rows:
+        probes[f"in {row['name']}"] = [f"{row['path']}/m.py"]
+    probes["outside every row"] = ["elsewhere/m.py"]
+    probes["empty"] = []
+    for g in subprojects.GLOBAL:
+        probes[f"global {g}"] = [g]
     out["select"] = {
-        "src/x.py": _try(root, lambda: subprojects.select(cfg, ["src/x.py"])),
-        "none": _try(root, lambda: subprojects.select(cfg, None)),
+        k: _try(root, lambda v=v: subprojects.select(cfg, v)) for k, v in probes.items()
+    }
+    out["matrix"] = {
+        "all (no diff)": _try(root, lambda: subprojects.matrix(cfg, root, "", "HEAD")),
+        "since tag": _try(root, lambda: subprojects.matrix(cfg, root, "v1.0.0", "HEAD")),
+        "forced": _try(root, lambda: subprojects.matrix(cfg, root, "v1.0.0", "HEAD", force=True)),
     }
     out["release_decide"] = _try(root, lambda: _decision(release.decide(cfg, root)))
     out["status_model"] = _try(root, lambda: model.build_model(FRAGMENT, cfg, root))

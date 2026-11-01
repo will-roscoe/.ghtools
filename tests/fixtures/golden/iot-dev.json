@@ -69,6 +69,41 @@
       "pytest-cov"
     ]
   },
+  "matrix": {
+    "all (no diff)": [
+      {
+        "include": [
+          {
+            "python": "none",
+            "runner": "ubuntu-latest"
+          }
+        ]
+      },
+      false
+    ],
+    "forced": [
+      {
+        "include": [
+          {
+            "python": "none",
+            "runner": "ubuntu-latest"
+          }
+        ]
+      },
+      false
+    ],
+    "since tag": [
+      {
+        "include": [
+          {
+            "python": "none",
+            "runner": "ubuntu-latest"
+          }
+        ]
+      },
+      false
+    ]
+  },
   "release_decide": {
     "current": "",
     "reason": "release.enabled = false",
@@ -78,7 +113,13 @@
     "version": ""
   },
   "select": {
+    "empty": [],
+    "global .github/ghtools.toml": [],
+    "global .github/workflows/ghtools.yml": [],
+    "global codecov.yml": [],
+    "global pyproject.toml": [],
     "none": [],
+    "outside every row": [],
     "src/x.py": []
   },
   "setup_commands": {
