@@ -54,10 +54,35 @@ def test_command_appends_marker():
 def test_command_joins_existing_marker():
     cfg = config.from_dict({"ci": {"test": "pytest -q -m slow"}})
     cmd = ci.test_command(cfg, deselect=["tui"])
-    assert cmd.count(" -m ") == 1
+    assert cmd.startswith("pytest -q -m slow ")
     assert "-m '(slow) and not tui'" in cmd
-    glued = config.from_dict({"ci": {"test": "pytest -q -mslow"}})
-    assert "-m '(slow) and not tui'" in ci.test_command(glued, deselect=["tui"])
+    for form in ("-mslow", "-m=slow"):
+        cfg2 = config.from_dict({"ci": {"test": f"pytest -q {form}"}})
+        assert "-m '(slow) and not tui'" in ci.test_command(cfg2, deselect=["tui"])
+
+
+def test_last_existing_marker_is_used():
+    cfg = config.from_dict({"ci": {"test": "pytest -m slow -m fast"}})
+    cmd = ci.test_command(cfg, deselect=["tui"])
+    assert cmd.startswith("pytest -m slow -m fast ")
+    assert "-m '(fast) and not tui'" in cmd
+
+
+def test_test_string_is_not_requoted():
+    cfg = config.from_dict({"ci": {"test": "pytest tests/*.py --basetemp=$TMP"}})
+    assert ci.test_command(cfg, deselect=["tui"]).startswith("pytest tests/*.py --basetemp=$TMP ")
+
+
+def test_compound_command_is_rejected():
+    for cmd in ("pytest -q && echo done", "pytest; true", "pytest | tee out", "pytest || true"):
+        with pytest.raises(ConfigError, match="ci.test.*ci.select|ci.select.*ci.test"):
+            config.from_dict({"ci": {"test": cmd, "select": [RULE]}})
+    config.from_dict({"ci": {"test": "pytest -q && echo done"}})  # fine without rules
+
+
+def test_quoted_operator_in_marker_is_not_compound():
+    cfg = config.from_dict({"ci": {"test": "pytest -m 'a or b|c;d'", "select": [RULE]}})
+    assert "-m '(a or b|c;d) and not tui'" in ci.test_command(cfg, deselect=["tui"])
 
 
 def test_two_markers():

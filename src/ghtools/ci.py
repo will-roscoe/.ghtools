@@ -63,23 +63,30 @@ def _marker_expr(deselect: Sequence[str], existing: str | None = None) -> str:
     return f"({existing}) and {nots}" if existing else nots
 
 
-def _with_marker(words: list[str], deselect: Sequence[str]) -> list[str]:
-    """`words` (a pytest command) with `deselect` added to its ``-m`` expression, or a new one."""
+def _existing_marker(words: list[str]) -> str | None:
+    """The `-m` expression pytest would use for `words`: the last of ``-m X``, ``-mX``, ``-m=X``."""
+    found = None
     for i, w in enumerate(words):
         if w == "-m" and i + 1 < len(words):
-            return [*words[: i + 1], _marker_expr(deselect, words[i + 1]), *words[i + 2 :]]
-        if w.startswith("-m") and not w.startswith("--") and len(w) > 2:
-            return [*words[:i], "-m", _marker_expr(deselect, w[2:]), *words[i + 1 :]]
-    return [*words, "-m", _marker_expr(deselect)]
+            found = words[i + 1]
+        elif w.startswith("-m") and not w.startswith("--") and len(w) > 2:
+            found = w[2:].removeprefix("=")
+    return found
+
+
+def _append_marker(base: str, deselect: Sequence[str]) -> str:
+    """`base` as written plus a final ``-m`` word; pytest honours the last ``-m``."""
+    expr = _marker_expr(deselect, _existing_marker(shlex.split(base)))
+    return f"{base} {shlex.join(['-m', expr])}"
 
 
 def test_command(cfg: Config, subproject: str | None = None, deselect: Sequence[str] = ()) -> str:
     """The shell command CI runs for tests (the root's, or `subproject`'s).
 
-    `deselect` lists pytest markers to leave out (see :func:`ghtools.selection.deselected`); each
-    becomes ``not <marker>``, and-joined into one ``-m`` expression with any ``-m`` already in
-    ``ci.test``. Empty `deselect` gives the command unchanged. A root ``ci.test`` that is not
-    pytest is returned as is.
+    `deselect` lists pytest markers to leave out (see :func:`ghtools.selection.deselected`). They
+    become one final ``-m 'not a and not b'`` word appended to ``ci.test`` as written, and-joined
+    with the effective ``-m`` already in it (the last one, as pytest reads it). Empty `deselect`
+    gives the command unchanged. A root ``ci.test`` that is not pytest is returned as is.
     """
     if subproject:
         # Run from the repo root so coverage paths stay repo-relative across legs.
@@ -96,7 +103,7 @@ def test_command(cfg: Config, subproject: str | None = None, deselect: Sequence[
     if not (words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]):
         return base
     if deselect:
-        base = shlex.join(_with_marker(words, deselect))
+        base = _append_marker(base, deselect)
     extra: list[str] = []
     package = cfg.get("ci.coverage.package")
     if package:
