@@ -584,3 +584,74 @@ def test_component_job_publishes_only_what_it_decided():
     assert "git push origin" not in push
     loop = _step("release-components", "GitHub releases")["run"]
     assert loop.count("</dev/null") == 2
+
+
+def _config_step(step_id):
+    return next(s for s in _pipeline()["jobs"]["config"]["steps"] if s.get("id") == step_id)
+
+
+def _run_step(tmp_path, step_id, env, fake_ghtools):
+    """Run a config-job step's script with a stub `ghtools`; return (output file text, stub log)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    stub = bindir / "ghtools"
+    stub.write_text(f'#!/bin/bash\necho "$@" >> "{tmp_path}/calls"\n{fake_ghtools}\n')
+    stub.chmod(0o755)
+    out = tmp_path / "out"
+    out.write_text("")
+    script = tmp_path / f"{step_id}.sh"
+    script.write_text(_config_step(step_id)["run"])
+    full = {"PATH": f"{bindir}:/usr/bin:/bin", "GITHUB_OUTPUT": str(out), **env}
+    subprocess.run(["bash", "-e", str(script)], env=full, check=True, cwd=tmp_path)
+    calls = tmp_path / "calls"
+    return out.read_text(), calls.read_text() if calls.exists() else ""
+
+
+def test_a_component_release_forces_ci_over_every_subproject():
+    ids = [s.get("id") for s in _pipeline()["jobs"]["config"]["steps"]]
+    # The decisions are known before anything that reads them.
+    for reader in ("select", "paths", "matrix"):
+        assert ids.index("components") < ids.index(reader)
+        assert ids.index("decide") < ids.index(reader)
+    assert ids.index("directives") < ids.index("select")
+
+
+@pytest.mark.parametrize("components", ["", "[]"])
+def test_no_due_component_leaves_the_run_decision_alone(tmp_path, components):
+    env = {"EVENT": "push", "BEFORE": "abc", "COMPONENTS": components}
+    out, calls = _run_step(tmp_path, "paths", env, 'echo "false"')
+    assert "run-ci=false" in out and "should-run" in calls
+
+
+def test_a_due_component_runs_ci_like_a_releasing_root(tmp_path):
+    env = {"EVENT": "push", "BEFORE": "abc", "COMPONENTS": '[{"name":"a"}]'}
+    out, calls = _run_step(tmp_path, "paths", env, 'echo "false"')
+    assert "run-ci=true" in out and "should-run" not in calls
+
+
+def test_matrix_covers_every_subproject_when_a_component_is_due(tmp_path):
+    base = {"BASE": "a", "HEAD": "b", "FORCE_CI": ""}
+    _, calls = _run_step(tmp_path, "matrix", {**base, "COMPONENTS": "[]"}, "true")
+    assert "--all" not in calls
+    (tmp_path / "calls").unlink()
+    _, calls = _run_step(tmp_path, "matrix", {**base, "COMPONENTS": '[{"name":"a"}]'}, "true")
+    assert "--all" in calls
+
+
+@pytest.mark.parametrize(
+    ("extra", "full"),
+    [
+        ({}, False),
+        ({"FORCE_CI": "true"}, True),
+        ({"WOULD_RELEASE": "true"}, True),
+        ({"COMPONENTS": '[{"name":"a"}]'}, True),
+        ({"COMPONENTS": "[]"}, False),
+    ],
+)
+def test_selection_never_deselects_on_a_forced_or_releasing_run(tmp_path, extra, full):
+    env = {"EVENT": "push", "BASE": "abc", **extra}
+    out, calls = _run_step(tmp_path, "select", env, "echo '[\"tui\"]'")
+    if full:
+        assert "deselect=[]" in out and "ci select" not in calls
+    else:
+        assert 'deselect=["tui"]' in out
