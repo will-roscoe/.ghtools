@@ -128,17 +128,21 @@ names a `marker` and `changed` globs; when no changed file matches, `ghtools ci 
 `-m "not <marker>"`. The config job prints the selection with `ghtools ci select`, diffing a pull
 request against its base and a push against the before-SHA (else the first parent). An unknown or
 unresolvable base, an event listed in `ci.select-full-on`, or a repo with no rules deselects
-nothing, so a repo without rules sees exactly the jobs and commands it did before.
+nothing, so a repo without rules sees exactly the jobs and commands it did before. Rules need
+`ci.test` to be a single pytest command: `&&`, `||`, `;` or `|` in it is a config error.
 
 The same selection goes to `ci skip-pr`, `ci reuse` and `ci record-tested`, so a record says what
-it ran. A repo with rules reuses only a record that made a claim: a full run, or the same
-selection. `ghtools ci test --record` runs the tests locally (with the selection computed against
-`origin`) and records the clean tree as tested; `ci.accept-local-tested` lets reuse accept such a
-record.
+it ran. A repo with rules reuses only a record that made a claim and left out nothing the run
+wants: a full run, or one that deselected no more than this run does.
+
+`ghtools ci test --record` runs the tests locally (with the selection computed against `origin`,
+or `--base REV`) and records the clean tree as tested; `ci.accept-local-tested` lets reuse accept
+such a record. It tests every subproject, so `--subproject` and `--deselect` are refused with it,
+and it never replaces a record made by CI. Gitignored files are not checked.
 
 ```toml
 [ci]
-select-full-on = ["push"]      # the default branch always runs everything
+select-full-on = ["push"]      # every push runs everything
 accept-local-tested = true     # trust a local `ghtools ci test --record`
 
 [[ci.select]]
