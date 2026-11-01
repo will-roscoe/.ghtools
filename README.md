@@ -121,6 +121,31 @@ nothing beyond the stub's existing `contents: write`.
 reuse-pr-results = true
 ```
 
+## Test selection and tested records
+
+`[[ci.select]]` rules leave out slow pytest markers when a change cannot affect them. A rule
+names a `marker` and `changed` globs; when no changed file matches, `ghtools ci test` ends with
+`-m "not <marker>"`. The config job prints the selection with `ghtools ci select`, diffing a pull
+request against its base and a push against the before-SHA (else the first parent). An unknown or
+unresolvable base, an event listed in `ci.select-full-on`, or a repo with no rules deselects
+nothing, so a repo without rules sees exactly the jobs and commands it did before.
+
+The same selection goes to `ci skip-pr`, `ci reuse` and `ci record-tested`, so a record says what
+it ran. A repo with rules reuses only a record that made a claim: a full run, or the same
+selection. `ghtools ci test --record` runs the tests locally (with the selection computed against
+`origin`) and records the clean tree as tested; `ci.accept-local-tested` lets reuse accept such a
+record.
+
+```toml
+[ci]
+select-full-on = ["push"]      # the default branch always runs everything
+accept-local-tested = true     # trust a local `ghtools ci test --record`
+
+[[ci.select]]
+marker = "tui"
+changed = ["src/sph/phantom_live/**"]
+```
+
 ## Commit directives
 
 Off by default. With `[directives] enabled = true`, tokens in the commits pushed to the default

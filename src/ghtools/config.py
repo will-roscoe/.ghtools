@@ -495,6 +495,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "flags": cfg.get("ci.coverage.flags"),
         "docker": cfg.get("ci.docker"),
         "reuse": cfg.get("ci.reuse-pr-results"),
+        "select": bool(cfg.get("ci.select")),
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
         "status": {"enabled": cfg.get("status.enabled")},
         "subprojects": bool(in_tree(cfg)),
