@@ -51,15 +51,21 @@ def since_range(tag: str | None) -> str:
     return f"{tag}..HEAD" if tag else "HEAD"
 
 
-def log_messages(rev_range: str, cwd: Path | str = ".") -> list[str]:
-    """Full commit messages in `rev_range`, newest first."""
-    out = git("log", "-z", "--format=%B", rev_range, cwd=cwd)
+def log_messages(rev_range: str, cwd: Path | str = ".", paths: Iterable[str] = ()) -> list[str]:
+    """Full commit messages in `rev_range`, newest first.
+
+    With `paths`, only commits that change one of them (git's default history simplification:
+    a branch merged in contributes the commits that touched the paths, not the merge itself).
+    """
+    tail = ["--", *paths] if paths else []
+    out = git("log", "-z", "--format=%B", rev_range, *tail, cwd=cwd)
     return [m for m in out.split("\0") if m.strip()]
 
 
-def log_subjects(rev_range: str, cwd: Path | str = ".") -> list[str]:
-    """Commit subjects in `rev_range`, oldest first."""
-    out = git("log", "-z", "--reverse", "--format=%s", rev_range, cwd=cwd)
+def log_subjects(rev_range: str, cwd: Path | str = ".", paths: Iterable[str] = ()) -> list[str]:
+    """Commit subjects in `rev_range`, oldest first; `paths` limits them as in `log_messages`."""
+    tail = ["--", *paths] if paths else []
+    out = git("log", "-z", "--reverse", "--format=%s", rev_range, *tail, cwd=cwd)
     return [s for s in out.split("\0") if s.strip()]
 
 

@@ -53,6 +53,8 @@ def decide(cfg: Config, root: Path, has_release: Callable[[str], bool] | None = 
     GitHub release yet (a run that failed after pushing the tag) is resumed, not skipped."""
     if not cfg.get("release.enabled"):
         return Decision(False, "", "", "", "release.enabled = false")
+    if not cfg.get("release.root"):
+        return Decision(False, "", "", "", "release.root = false")
     check_paths(cfg, root)
     current = latest_tag(root)
     if (

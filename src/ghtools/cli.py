@@ -109,8 +109,18 @@ def _cmd_version_next(args: Any) -> int:
 
     root = repo_dir(args)
     cfg = _config.load_or_defaults(root)
-    current = gitutil.latest_tag(root)
-    messages = gitutil.log_messages(gitutil.since_range(current), root)
+    if args.component:
+        from . import components
+
+        c = components.find(cfg, args.component)
+        current = components.latest_tag(c, root)
+        messages = gitutil.log_messages(
+            gitutil.since_range(current), root, [c.path, *c.needs_paths]
+        )
+        current = components.tag_version(c, current) if current else None
+    else:
+        current = gitutil.latest_tag(root)
+        messages = gitutil.log_messages(gitutil.since_range(current), root)
     if args.explain:
         for first, effect in explain(messages):
             print(f"{effect:<6} {first}", file=sys.stderr)
@@ -129,6 +139,7 @@ def _version_commands(sub: Any) -> None:
     )
     n = vs.add_parser("next", help="version a merge would release now (nothing if none)")
     n.add_argument("--explain", action="store_true", help="list each commit's effect on stderr")
+    n.add_argument("--component", default="", help="the released component to compute for")
     n.set_defaults(handler=_cmd_version_next)
 
 
@@ -159,6 +170,49 @@ def _cmd_release_decide(args: Any) -> int:
         print(decision.summary())
     elif not args.github_output:
         print(decision.reason)
+    return 0
+
+
+def _cmd_release_components_decide(args: Any) -> int:
+    from . import components
+
+    root = repo_dir(args)
+    decisions = components.decide(_config.load_or_defaults(root), root, _release_checker(root))
+    due = [d for d in decisions if d.release]
+    if args.github_output:
+        write_github_output(
+            {
+                "components": json.dumps([d.as_dict() for d in due], separators=(",", ":")),
+                "released": "true" if due else "false",
+                "commit-message": components.commit_message(decisions),
+            }
+        )
+    else:
+        for d in decisions:
+            print(f"{d.component.name}: {d.reason}")
+    return 0
+
+
+def _cmd_release_components_prepare(args: Any) -> int:
+    from . import components
+
+    root = repo_dir(args)
+    cfg = _config.load_or_defaults(root)
+    decisions = components.decide(cfg, root, _release_checker(root))
+    if args.only:
+        decisions = [d for d in decisions if d.component.name in args.only]
+    for path in components.prepare(cfg, root, decisions):
+        print(path)
+    return 0
+
+
+def _cmd_release_components_notes(args: Any) -> int:
+    from . import components
+
+    root = repo_dir(args)
+    text = components.notes(_config.load_or_defaults(root), root, args.name, args.version)
+    if text:
+        print(text)
     return 0
 
 
@@ -204,6 +258,18 @@ def _release_commands(sub: Any) -> None:
     no = rs.add_parser("notes", help="print the changelog section for a version")
     no.add_argument("version")
     no.set_defaults(handler=_cmd_release_notes)
+    cp = rs.add_parser("components", help="release in-tree components (release = true)")
+    cs = cp.add_subparsers(dest="components_cmd", required=True, metavar="<subcommand>")
+    cd = cs.add_parser("decide", help="decide each component's next release")
+    cd.add_argument("--github-output", action="store_true", help="write outputs to $GITHUB_OUTPUT")
+    cd.set_defaults(handler=_cmd_release_components_decide)
+    cpp = cs.add_parser("prepare", help="write version files + changelogs; print changed paths")
+    cpp.add_argument("--only", nargs="+", default=[], metavar="NAME", help="limit to these")
+    cpp.set_defaults(handler=_cmd_release_components_prepare)
+    cn = cs.add_parser("notes", help="print a component's changelog section for a version")
+    cn.add_argument("name")
+    cn.add_argument("version")
+    cn.set_defaults(handler=_cmd_release_components_notes)
     b = rs.add_parser("build", help="build release assets")
     b.add_argument("--out", default="dist")
     b.set_defaults(handler=_cmd_release_build)
