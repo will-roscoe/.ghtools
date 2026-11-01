@@ -1,0 +1,29 @@
+# ghtools settings for ghtools itself
+schema = 1
+branch = "main"
+profile = "python"
+
+[version]
+source = "tag"
+
+[release]
+publish = ["github"]
+changelog = "CHANGELOG.md"
+
+[ci]
+python = ["3.11", "3.12", "3.13"]
+install = "-e .[dev]"
+test = "pytest -q"
+paths = ["**.py", "pyproject.toml", ".github/**", "src/ghtools/templates/**"]
+gates = ["ruff", "ruff-format", "actionlint", "codecov-sync"]
+
+[ci.coverage]
+package = "src/ghtools"
+floor = 80
+
+[status]
+enabled = true
+card = ["tests", "coverage", "lint", "release"]
+rows = ["python"]
+badges = ["version", "coverage", "tests", "python"]
+logo = ".github/logo.svg"                      # the card shows the project logo

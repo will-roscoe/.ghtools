@@ -10,6 +10,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+import shlex
+import string
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +51,8 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "zip": Field(str, ""),
         "commit": Field(bool, True),
         "changelog": Field(str, "CHANGELOG.md"),
+        # false: the repo itself no longer releases as v{x}; only released components do.
+        "root": Field(bool, True),
     },
     "ci": {
         "python": Field(list, ["3.12"]),
@@ -65,6 +69,11 @@ SCHEMA: dict[str, dict[str, Field]] = {
         # passed on a same-repo pull request (recorded under refs/ghtools/tested/); the recorded
         # results still feed the status card.
         "reuse-pr-results": Field(bool, False),
+        # Accept tested records written by a local run (meta source "local"); their legs carry no
+        # CI python or runner, so only subprojects are compared. Off: only CI records are reused.
+        "accept-local-tested": Field(bool, False),
+        # Events (push, pull_request, ...) that always run the full selection, ignoring ci.select.
+        "select-full-on": Field(list, []),
         "gates": Field(list, ["ruff", "ruff-format"]),
         "docker": Field(bool, False),
         "setup": Field(list, []),  # commands run after install, before gates and tests
@@ -108,6 +117,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "rows": Field(list, ["python", "builds"], _c("python", "builds", "extra")),
         "links": Field(list, ["pypi", "docs", "repo"], _c("pypi", "docs", "repo")),
         "logo": Field(str, ""),
+        # "components": a block per released component (name, version, tests, docs) replaces
+        # the quality cards; "single" is the card every repo had before components existed.
+        "layout": Field(str, "single", _c("single", "components")),
         "extra": Field(list, []),
         "badges": Field(
             list,
@@ -134,6 +146,10 @@ TABLE_ARRAYS: dict[str, dict[str, Field]] = {
         "run": Field(str, None),
         "after": Field(str, "test", _c("test", "docs")),
     },
+    "ci.select": {  # leave a pytest marker out unless the change touches `changed`
+        "marker": Field(str, None),
+        "changed": Field(list, None),
+    },
     "readme.block": {
         "name": Field(str, None),
         "kind": Field(str, "sync", _c("sync", "status")),
@@ -149,6 +165,15 @@ TABLE_ARRAYS: dict[str, dict[str, Field]] = {
         "install": Field(list, []),
         "needs": Field(list, []),
         "setup": Field(list, []),
+        # Released components (see ghtools.components); all opt-in.
+        "release": Field(bool, False),
+        "version-file": Field(str, ""),  # "" -> "<path>/pyproject.toml"
+        "changelog": Field(str, ""),  # "" -> "<path>/CHANGELOG.md"
+        "tag": Field(str, "{name}/{version}"),
+        "apidoc": Field(list, []),
+        "docs-paths": Field(list, []),
+        # Runs verbatim instead of pytest; "tests" is a pytest path, not a command.
+        "test-command": Field(str, ""),
     },
 }
 
@@ -321,6 +346,20 @@ def _cross_checks(cfg: Config) -> None:
             raise ConfigError(f"readme.block[{i}].heading-offset: must be between -1 and 2")
         if block["kind"] == "sync" and not block["source"]:
             raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
+    for i, row in enumerate(cfg.get("ci.select")):
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", row["marker"]):
+            raise ConfigError(
+                f"ci.select[{i}].marker: {row['marker']!r} must be a plain pytest marker name"
+            )
+        if not row["changed"]:
+            raise ConfigError(f"ci.select[{i}].changed: must not be empty")
+    if cfg.get("ci.select") and not is_pytest:
+        raise ConfigError("ci.select needs ci.test to run pytest (it works by passing -m)")
+    if cfg.get("ci.select") and _is_compound(cfg.get("ci.test")):
+        raise ConfigError(
+            "ci.select needs ci.test to be a single pytest command "
+            "(no &&, ||, ; or |): the -m it appends would land on the last command"
+        )
     if cfg.get("ci.coverage.threshold") < 0:
         raise ConfigError("ci.coverage.threshold: must not be negative")
     if cfg.get("ci.coverage.uploads-per-day") < 0:
@@ -357,6 +396,42 @@ def in_tree(cfg: Config) -> list[dict[str, Any]]:
     return [s for s in cfg.get("subprojects") if s["kind"] == "in-tree"]
 
 
+def _is_compound(command: str) -> bool:
+    """Does the shell command chain several commands with ``&&``, ``||``, ``;`` or ``|``?"""
+    lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    try:
+        return any(set(t) <= set("&|;()") for t in lex)
+    except ValueError:  # unbalanced quotes: leave it to the shell
+        return False
+
+
+def _check_tag(where: str, template: str, need_name: bool = False) -> None:
+    """Reject a tag template lacking ``{version}`` or using fields beyond name and version.
+
+    With `need_name` (a released component) it must also contain ``{name}``: without it the tags
+    collide with the root's ``v{version}`` tags or with another component's.
+    """
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except ValueError as exc:
+        raise ConfigError(f"{where}: {template!r} is not a valid template ({exc})") from None
+    fields = [f for _, f, _, _ in parsed if f is not None]
+    unknown = sorted({f for f in fields if f not in ("name", "version")})
+    if unknown or any(spec or conv for _, f, spec, conv in parsed if f is not None):
+        raise ConfigError(
+            f"{where}: {template!r} may only use the plain fields {{name}} and {{version}}"
+            + (f" (found {unknown})" if unknown else "")
+        )
+    if "version" not in fields:
+        raise ConfigError(f"{where}: {template!r} must contain {{version}}")
+    if need_name and "name" not in fields:
+        raise ConfigError(
+            f"{where}: {template!r} must contain {{name}} so a component's tags cannot collide "
+            "with the root's or another component's"
+        )
+
+
 def _check_subprojects(cfg: Config) -> None:
     rows = cfg.get("subprojects")
     names: list[str] = []
@@ -376,6 +451,13 @@ def _check_subprojects(cfg: Config) -> None:
         if row["name"] in names:
             raise ConfigError(f"subprojects[{i}].name: duplicate subproject {row['name']!r}")
         names.append(row["name"])
+        _check_tag(f"subprojects[{i}].tag", row["tag"], need_name=row["release"])
+        bases = [Path(a.rstrip("/")).name for a in row["apidoc"]]
+        if len(set(bases)) != len(bases):
+            raise ConfigError(
+                f"subprojects[{i}].apidoc: {row['name']!r} lists two packages with the same "
+                "directory name, which would share one api directory"
+            )
     for i, row in enumerate(rows):
         for need in row["needs"]:
             if need not in names:
@@ -447,6 +529,7 @@ def export(cfg: Config) -> dict[str, Any]:
     ``matrix.include`` legs have their runner resolved against the shipped python build snapshot
     (see :mod:`ghtools.runners`); legs no runner can run are omitted.
     """
+    from .components import released  # local import: components imports config
     from .runners import resolve_matrix  # local import: runners imports config
 
     python, runners = cfg.get("ci.python"), cfg.get("ci.runners")
@@ -461,9 +544,11 @@ def export(cfg: Config) -> dict[str, Any]:
         "flags": cfg.get("ci.coverage.flags"),
         "docker": cfg.get("ci.docker"),
         "reuse": cfg.get("ci.reuse-pr-results"),
+        "select": bool(cfg.get("ci.select")),
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
         "status": {"enabled": cfg.get("status.enabled")},
         "subprojects": bool(in_tree(cfg)),
+        "components": bool(released(cfg)),
         "release": {
             "enabled": cfg.get("release.enabled"),
             "commit": cfg.get("release.commit"),

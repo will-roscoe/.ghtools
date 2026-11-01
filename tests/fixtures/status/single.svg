@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 551" width="900" height="551">
+<style>
+svg { font-family: var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif); }
+.background { fill: var(--bgColor-default, #0d1117); }
+.text { fill: var(--fgColor-default, var(--color-fg-default, #f6f8fa)); }
+.muted { fill: var(--color-prettylights-syntax-comment, #656d76); }
+.card { fill: var(--bgColor-muted, var(--color-canvas-subtle, #151b23)); }
+.mono { font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.title { font-size: 2em; font-weight: 600; }
+.subtitle { font-size: 16px; }
+.label { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; }
+.value { font-size: 22px; font-weight: 500; }
+.small { font-size: 13px; }
+.link { fill: var(--fgColor-accent, var(--color-accent-fg, #0969da)); text-decoration: underline; }
+.pass { fill: var(--bgColor-success-emphasis, #1a7f37); }
+.fail { fill: var(--bgColor-danger-emphasis, #cf222e); }
+.warn { fill: var(--bgColor-attention-emphasis, #9a6700); }
+.ok { fill: var(--bgColor-success-emphasis, #1a7f37); }
+</style>
+<rect class="background" x="1" y="1" width="898" height="549" rx="14"/>
+<text class="title text" x="35" y="55">protonfs</text>
+<text class="subtitle muted" x="35" y="90">
+<tspan x="35">Sync a local directory tree with Proton Drive via the official Proton</tspan>
+<tspan x="35" dy="18">Drive CLI, with conflict-aware push/pull and a local sync manifest.</tspan>
+</text>
+<text class="value text" x="865" y="55" text-anchor="end">v2.3.0</text>
+<a href="https://pypi.org/project/protonfs/"><text class="link" x="35" y="138">PyPI</text></a>
+<a href="https://x.github.io/protonfs"><text class="link" x="94" y="138">Documentation</text></a>
+<a href="https://github.com/x/protonfs"><text class="link" x="232" y="138">Repository</text></a>
+<text class="label muted" x="35" y="183">QUALITY</text>
+<rect class="card" x="35" y="201" width="190" height="90" rx="10"/>
+<text class="label mono pass" x="50" y="226">TESTS</text>
+<text class="value text" x="50" y="258">✓ 1031</text>
+<text class="small mono muted" x="50" y="278">0 failed · 17 skipped</text>
+<rect class="card" x="245" y="201" width="190" height="90" rx="10"/>
+<text class="label mono pass" x="260" y="226">COVERAGE</text>
+<text class="value text" x="260" y="258">96.8%</text>
+<text class="small mono muted" x="260" y="278">line coverage</text>
+<rect class="card" x="455" y="201" width="190" height="90" rx="10"/>
+<text class="label mono pass" x="470" y="226">LINT</text>
+<text class="value text" x="470" y="258">✓ Clean</text>
+<text class="small mono muted" x="470" y="278">ruff</text>
+<rect class="card" x="665" y="201" width="190" height="90" rx="10"/>
+<text class="label mono pass" x="680" y="226">DOCS</text>
+<text class="value text" x="680" y="258">✓ Built</text>
+<text class="small mono muted" x="680" y="278">100% documented</text>
+<text class="label muted" x="35" y="331">PYTHON SUPPORT</text>
+<text class="small text" x="45" y="361" text-anchor="middle">3.9</text>
+<circle cx="45" cy="386" r="8" class="pass"/>
+<text class="small text" x="95" y="361" text-anchor="middle">3.10</text>
+<circle cx="95" cy="386" r="8" class="pass"/>
+<text class="small text" x="145" y="361" text-anchor="middle">3.11</text>
+<circle cx="145" cy="386" r="8" class="pass"/>
+<text class="small text" x="195" y="361" text-anchor="middle">3.12</text>
+<circle cx="195" cy="386" r="8" class="pass"/>
+<text class="small text" x="245" y="361" text-anchor="middle">3.13</text>
+<circle cx="245" cy="386" r="8" class="pass"/>
+<text class="label muted" x="345" y="331">BUILDS</text>
+<text class="small muted" x="345" y="381">arm64</text>
+<text class="small muted" x="345" y="403">x86_64</text>
+<text class="small text" x="435" y="359" text-anchor="middle">Linux</text>
+<circle cx="435" cy="377" r="6" class="pass"/>
+<circle cx="435" cy="399" r="6" class="pass"/>
+<text class="small text" x="495" y="359" text-anchor="middle">macOS</text>
+<circle cx="495" cy="377" r="6" class="fail"/>
+<circle cx="495" cy="399" r="6" class="pass"/>
+<text class="label muted" x="575" y="331">SUBPROJECTS</text>
+<text class="small text" x="585" y="361" text-anchor="middle">a</text>
+<circle cx="585" cy="386" r="8" class="pass"/>
+<text class="small text" x="655" y="361" text-anchor="middle">b</text>
+<circle cx="655" cy="386" r="8" class="fail"/>
+<text class="label muted" x="35" y="441">PROTON DRIVE</text>
+<text class="small text" x="35" y="471">Pinned</text>
+<text class="value mono warn" x="35" y="499">0.8.0</text>
+<text class="small text" x="125" y="471">Latest</text>
+<text class="value mono muted" x="125" y="499">0.8.1</text>
+</svg>

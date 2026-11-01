@@ -42,10 +42,13 @@ class Decision:
         return f"{head}\n\n{self.reason}\n\n_Dry run: nothing was written or tagged._\n"
 
 
-def _made_by_ghtools(tag: str, root: Path) -> bool:
+def made_by_ghtools(tag: str, root: Path) -> bool:
     """The release job annotates its tags "Release <tag>"; hand-made tags are never resumed."""
     subject = git("tag", "-l", "--format=%(contents:subject)", tag, cwd=root, check=False).strip()
     return subject == f"Release {tag}"
+
+
+_made_by_ghtools = made_by_ghtools
 
 
 def decide(cfg: Config, root: Path, has_release: Callable[[str], bool] | None = None) -> Decision:
@@ -53,6 +56,8 @@ def decide(cfg: Config, root: Path, has_release: Callable[[str], bool] | None = 
     GitHub release yet (a run that failed after pushing the tag) is resumed, not skipped."""
     if not cfg.get("release.enabled"):
         return Decision(False, "", "", "", "release.enabled = false")
+    if not cfg.get("release.root"):
+        return Decision(False, "", "", "", "release.root = false")
     check_paths(cfg, root)
     current = latest_tag(root)
     if (

@@ -1,0 +1,60 @@
+# ghtools settings: https://github.com/will-roscoe/.ghtools#configuration
+
+branch = "master"                            # the remote's default branch
+profile = "python"                           # pyproject.toml [project]
+
+[version]
+source = "pyproject"                         # static version = "0.29.2" in [project]
+bump = "write"                               # release commit rewrites [project].version
+
+[release]
+publish = ["github"]                         # GitHub release
+
+[ci]
+python = ["3.12"]                            # python-version in workflows
+install = "-e .[dev,images]"                 # pip install in workflows
+setup = ["python src/setup/applysetup.py update"] # sarracen patches, as ci.yml applied after install
+gates = ["ruff", "interrogate"]              # tool configuration and existing workflows
+skip-pr-heads = ["next"]                     # release PRs: next was tested by its feature PRs
+reuse-pr-results = true                      # ghtools >= 1.8: a master push whose tree a PR already tested skips tests
+
+[ci.coverage]
+package = "src/sph"                          # --cov in workflows
+codecov = true                               # codecov-action in workflows
+
+[docs]
+enabled = true                               # doc/conf.py
+dir = "doc"                                  # chosen at init
+install = ".[docs]"                          # pip install in docs workflow
+apidoc = "src/sph"                           # sphinx-apidoc in docs workflow
+strict = false                               # warnings allowed in the existing Sphinx call
+pages = true                                 # actions/deploy-pages in workflows
+paths = ["doc/**", "src/**", "pyproject.toml"] # ghtools >= 1.8: docs build only when these change
+
+[status]
+enabled = true                               # ghtools publishes the status card to its own branch
+badges = ["version", "coverage", "tests", "lint", "python", "docstrings"] # badges the README uses
+logo = ".github/logo.svg"                      # the card shows the project logo
+
+[directives]
+enabled = true                               # a commit-directives workflow
+dispatch = { "update-todo" = "update-todo.yml" } # workflows it dispatches (ci and docs are built in)
+
+[[subprojects]]
+name = "phantom"
+path = "phantom"
+kind = "submodule"
+
+[[subprojects]]
+name = "phantom_young"
+path = "phantom-young"
+kind = "submodule"
+
+[[subprojects]]
+name = "docs"
+path = "docs"
+kind = "submodule"
+
+[[readme.block]]
+name = "status"
+kind = "status"                              # the status card under the title

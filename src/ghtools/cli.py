@@ -15,7 +15,7 @@ from typing import Any
 
 from . import config as _config
 from . import gitutil
-from .errors import GhtoolsError
+from .errors import ConfigError, GhtoolsError
 
 _REGISTRARS: list[Callable[[Any], None]] = []
 
@@ -109,8 +109,18 @@ def _cmd_version_next(args: Any) -> int:
 
     root = repo_dir(args)
     cfg = _config.load_or_defaults(root)
-    current = gitutil.latest_tag(root)
-    messages = gitutil.log_messages(gitutil.since_range(current), root)
+    if args.component:
+        from . import components
+
+        c = components.find(cfg, args.component)
+        current = components.latest_tag(c, root)
+        messages = gitutil.log_messages(
+            gitutil.since_range(current), root, [c.path, *c.needs_paths]
+        )
+        current = components.tag_version(c, current) if current else None
+    else:
+        current = gitutil.latest_tag(root)
+        messages = gitutil.log_messages(gitutil.since_range(current), root)
     if args.explain:
         for first, effect in explain(messages):
             print(f"{effect:<6} {first}", file=sys.stderr)
@@ -129,6 +139,7 @@ def _version_commands(sub: Any) -> None:
     )
     n = vs.add_parser("next", help="version a merge would release now (nothing if none)")
     n.add_argument("--explain", action="store_true", help="list each commit's effect on stderr")
+    n.add_argument("--component", default="", help="the released component to compute for")
     n.set_defaults(handler=_cmd_version_next)
 
 
@@ -159,6 +170,56 @@ def _cmd_release_decide(args: Any) -> int:
         print(decision.summary())
     elif not args.github_output:
         print(decision.reason)
+    return 0
+
+
+def _cmd_release_components_decide(args: Any) -> int:
+    from . import components
+
+    root = repo_dir(args)
+    decisions = components.decide(_config.load_or_defaults(root), root, _release_checker(root))
+    due = [d for d in decisions if d.release]
+    if args.github_output:
+        write_github_output(
+            {
+                "components": json.dumps([d.as_dict() for d in due], separators=(",", ":")),
+                "released": "true" if due else "false",
+                "commit-message": components.commit_message(decisions),
+            }
+        )
+    else:
+        for d in decisions:
+            print(f"{d.component.name}: {d.reason}")
+    return 0
+
+
+def _cmd_release_components_prepare(args: Any) -> int:
+    from . import components
+
+    root = repo_dir(args)
+    cfg = _config.load_or_defaults(root)
+    if args.decisions is not None:
+        try:
+            rows = json.loads(args.decisions)
+        except ValueError as exc:
+            raise ConfigError(f"--decisions: not valid JSON ({exc})") from exc
+        decisions = components.decisions_from_rows(cfg, rows)  # nothing is decided again
+    else:
+        decisions = components.decide(cfg, root, _release_checker(root))
+    if args.only:
+        decisions = [d for d in decisions if d.component.name in args.only]
+    for path in components.prepare(cfg, root, decisions):
+        print(path)
+    return 0
+
+
+def _cmd_release_components_notes(args: Any) -> int:
+    from . import components
+
+    root = repo_dir(args)
+    text = components.notes(_config.load_or_defaults(root), root, args.name, args.version)
+    if text:
+        print(text)
     return 0
 
 
@@ -204,6 +265,23 @@ def _release_commands(sub: Any) -> None:
     no = rs.add_parser("notes", help="print the changelog section for a version")
     no.add_argument("version")
     no.set_defaults(handler=_cmd_release_notes)
+    cp = rs.add_parser("components", help="release in-tree components (release = true)")
+    cs = cp.add_subparsers(dest="components_cmd", required=True, metavar="<subcommand>")
+    cd = cs.add_parser("decide", help="decide each component's next release")
+    cd.add_argument("--github-output", action="store_true", help="write outputs to $GITHUB_OUTPUT")
+    cd.set_defaults(handler=_cmd_release_components_decide)
+    cpp = cs.add_parser("prepare", help="write version files + changelogs; print changed paths")
+    cpp.add_argument("--only", nargs="+", default=[], metavar="NAME", help="limit to these")
+    cpp.add_argument(
+        "--decisions",
+        metavar="JSON",
+        help="the `components` output of `decide --github-output`; written as given, no re-decide",
+    )
+    cpp.set_defaults(handler=_cmd_release_components_prepare)
+    cn = cs.add_parser("notes", help="print a component's changelog section for a version")
+    cn.add_argument("name")
+    cn.add_argument("version")
+    cn.set_defaults(handler=_cmd_release_components_notes)
     b = rs.add_parser("build", help="build release assets")
     b.add_argument("--out", default="dist")
     b.set_defaults(handler=_cmd_release_build)
@@ -254,19 +332,31 @@ def _cmd_ci_install(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
-    return _run_checked(ci.install_command(_config.load(root), args.subproject), root, "install")
+    command = ci.install_command(_config.load(root), args.subproject)
+    if not command:  # a test-command subproject with no install: nothing to do
+        return 0
+    return _run_checked(command, root, "install")
 
 
 def _cmd_ci_test(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
-    command = ci.test_command(_config.load(root), args.subproject)
-    if args.subproject:
+    if args.record:
+        return _record_local_run(args, root)
+    if args.base:
+        from .errors import PreconditionError
+
+        raise PreconditionError("--base only applies with --record")
+    deselect = json.loads(args.deselect) if args.deselect else []
+    command = ci.test_command(_config.load(root), args.subproject, deselect)
+    if args.subproject or deselect:
+        # Deselecting can leave nothing to collect (pytest exit 5): not a failure.
+        what = args.subproject or "the repo"
         proc = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root)
         if proc.returncode == 5:  # pytest collected nothing: a subproject without tests
             prefix = "::notice::" if os.environ.get("GITHUB_ACTIONS") == "true" else ""
-            print(f"{prefix}no tests collected for {args.subproject}", flush=True)
+            print(f"{prefix}no tests collected for {what}", flush=True)
             return 0
         if proc.returncode != 0:
             from .errors import CheckFailed
@@ -274,6 +364,143 @@ def _cmd_ci_test(args: Any) -> int:
             raise CheckFailed(f"tests failed (exit {proc.returncode})")
         return 0
     return _run_checked(command, root, "tests")
+
+
+def _record_local_run(args: Any, root: Path) -> int:
+    """`ci test --record`: run the lint gates and the tests, then record HEAD's tree as tested.
+
+    Refuses, before running anything, a tree with uncommitted or untracked files (the record
+    claims HEAD's tree passed) and a repo with no `origin`. Tests only what `--subproject` names, or
+    else the root (profile python) and every in-tree subproject. The markers left out are
+    :func:`ghtools.selection.deselected` against `--base` (default: merge-base with
+    ``origin/<branch>``; unknown, or equal to HEAD, means a full run). Nothing is recorded
+    unless the test-stage gates (:func:`ghtools.gates.resolve`, the ones CI's lint job runs) and
+    every leg pass and the tree is still untouched, and an existing CI record for the
+    tree is left alone. The gates are recorded in the root leg (profile python) or a lint-only
+    leg, as CI records them. Only tracked content is vouched for: gitignored files are not checked.
+    Prints the ref. Raises PreconditionError (also for `--subproject` or `--deselect`, which
+    would make a partial or contradictory claim) or CheckFailed.
+    """
+    import tempfile
+
+    from . import ci, gates, reuse, selection
+    from .errors import CheckFailed, PreconditionError
+    from .status import fragments as fr
+
+    if args.subproject:
+        raise PreconditionError(
+            "--record tests every leg; it cannot be combined with --subproject "
+            "(one leg would replace the tree's full record)"
+        )
+    if args.deselect:
+        raise PreconditionError("--record computes the selection itself; drop --deselect")
+
+    def dirty(untracked: str) -> str:
+        return gitutil.git(
+            "status", "--porcelain", f"--untracked-files={untracked}", cwd=root
+        ).strip()
+
+    if dirty("all"):
+        raise PreconditionError("refusing to record: the working tree has uncommitted changes")
+    if gitutil.git("remote", "get-url", "origin", cwd=root, check=False).strip() == "":
+        raise PreconditionError("refusing to record: no 'origin' remote to push the record to")
+    head = reuse.tree_sha(root)
+    cfg = _config.load(root)
+    base = args.base
+    if not base:
+        base = gitutil.git(
+            "merge-base", "HEAD", f"origin/{cfg.get('branch')}", cwd=root, check=False
+        ).strip()
+        # HEAD itself (e.g. on the default branch): an empty diff means "already on origin".
+        if base == gitutil.git("rev-parse", "HEAD", cwd=root).strip():
+            base = ""
+    deselect = selection.deselected(cfg, gitutil.changed_files(base, root), "local")
+    names = [""] if cfg.get("profile") == "python" else []
+    names += [row["name"] for row in _config.in_tree(cfg)]
+    if not names:
+        raise PreconditionError("nothing to test: profile is not python and no in-tree subprojects")
+    python = f"{sys.version_info.major}.{sys.version_info.minor}"
+    # The gates CI's lint job runs, once up front: a failing gate records nothing.
+    gate_specs = gates.resolve(cfg, "test")
+    try:
+        gates.run(gate_specs, root)
+    except CheckFailed as exc:
+        raise CheckFailed(f"{exc}; nothing recorded") from exc
+    legs: dict[str, dict[str, Any]] = {}
+    for name in names:
+        for out in ("junit.xml", "coverage.xml"):  # a stale report must not describe this leg
+            if not gitutil.git("ls-files", out, cwd=root).strip():
+                (root / out).unlink(missing_ok=True)
+        what = name or "the repo"
+        command = ci.test_command(cfg, name or None, deselect)
+        print(f"ghtools: testing {what}", flush=True)
+        proc = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root)
+        if proc.returncode == 5 and (name or deselect):
+            print(f"no tests collected for {what}", flush=True)
+        elif proc.returncode != 0:
+            raise CheckFailed(f"tests failed for {what} (exit {proc.returncode}); nothing recorded")
+        legs[name or "root"] = fr.leg(
+            python,
+            "local",
+            "success",
+            "success" if cfg.get("profile") == "python" and not name else "",
+            fr.parse_junit(root / "junit.xml"),
+            fr.parse_coverage_xml(root / "coverage.xml"),
+            False,
+            None,
+            subproject=name,
+        )
+    if cfg.get("profile") != "python":  # as CI's lint job: a gates-only leg
+        legs["lint"] = fr.leg(
+            python,
+            "local",
+            "success",
+            "success",
+            fr.parse_junit(root / "no-junit.xml"),
+            None,
+            False,
+            None,
+            lint_only=True,
+        )
+    if reuse.tree_sha(root) != head or dirty("no"):
+        raise PreconditionError("refusing to record: the tests changed the tree they ran on")
+    if reuse.recorded_source(root) not in (None, "local"):
+        print(f"ghtools: tree already recorded by CI ({reuse.ref_for(head)}), not replacing it")
+        return 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for key, leg in legs.items():
+            d = Path(tmp) / f"ghtools-status-leg-{key}"
+            d.mkdir()
+            (d / "status-leg.json").write_text(json.dumps(leg))
+        print(reuse.record(root, Path(tmp), meta={"source": "local", "deselected": deselect}))
+    return 0
+
+
+def _cmd_ci_select(args: Any) -> int:
+    from . import selection
+    from .gitutil import changed_files
+
+    root = repo_dir(args)
+    cfg = _config.load(root)
+    print(json.dumps(selection.deselected(cfg, changed_files(args.base, root), args.event)))
+    return 0
+
+
+def _reuse_selection(root: Path, deselect: str, no_local: bool = False) -> dict[str, Any]:
+    """Keyword arguments for reuse.lookup/is_tested: the markers this run leaves out
+    (`--deselect` JSON), whether the repo has ci.select rules, ci.accept-local-tested (forced
+    off by `no_local`), and whether lint gates apply (a local record must then show them
+    passing)."""
+    from . import gates
+
+    want = json.loads(deselect) if deselect else []
+    cfg = _config.load_or_defaults(root)  # no config file: defaults; a malformed one raises
+    return {
+        "want": want,
+        "has_rules": bool(cfg.get("ci.select")),
+        "accept_local": bool(cfg.get("ci.accept-local-tested")) and not no_local,
+        "needs_gates": bool(gates.resolve(cfg, "test")),
+    }
 
 
 def _cmd_ci_skip_pr(args: Any) -> int:
@@ -289,7 +516,7 @@ def _cmd_ci_skip_pr(args: Any) -> int:
     # after the other leave a tree that was never tested together.
     if not args.sha:
         print(f"ghtools: not skipping '{args.head}': no head sha to look up", file=sys.stderr)
-    elif not reuse.is_tested(root, args.sha):
+    elif not reuse.is_tested(root, args.sha, **_reuse_selection(root, args.deselect)):
         print(
             f"ghtools: not skipping '{args.head}': no {reuse.REF_PREFIX}<tree> ref for the tree "
             f"of {args.sha[:12]}, running tests",
@@ -313,7 +540,11 @@ def _cmd_ci_docs_changed(args: Any) -> int:
 def _cmd_ci_record_tested(args: Any) -> int:
     from . import reuse
 
-    print(reuse.record(repo_dir(args), Path(args.legs)))
+    # No --deselect: the selection is unknown, so the record vouches for no full run.
+    meta = {"source": "ci"}
+    if args.deselect:
+        meta["deselected"] = json.loads(args.deselect)
+    print(reuse.record(repo_dir(args), Path(args.legs), meta=meta))
     return 0
 
 
@@ -322,7 +553,8 @@ def _cmd_ci_reuse(args: Any) -> int:
 
     root = repo_dir(args)
     matrix = json.loads(args.matrix)
-    if reuse.lookup(root, Path(args.out), matrix):
+    kwargs = _reuse_selection(root, args.deselect, no_local=args.no_local)
+    if reuse.lookup(root, Path(args.out), matrix, **kwargs):
         print("true")
     else:
         print("false")
@@ -415,7 +647,24 @@ def _ci_commands(sub: Any) -> None:
     ins.set_defaults(handler=_cmd_ci_install)
     tst = cs.add_parser("test", help="run ci.test (or a subproject's tests) with coverage/junit")
     tst.add_argument("--subproject", default=None)
+    tst.add_argument(
+        "--deselect", default="", help="JSON list of pytest markers to leave out (ci select)"
+    )
+    tst.add_argument(
+        "--record",
+        action="store_true",
+        help="after a pass, push a local 'tested' record for this tree (needs a clean tree)",
+    )
+    tst.add_argument(
+        "--base", default="", help="with --record: the revision to select against (default: origin)"
+    )
     tst.set_defaults(handler=_cmd_ci_test)
+    sl = cs.add_parser(
+        "select", help="pytest markers to leave out for this change (ci.select), as a JSON list"
+    )
+    sl.add_argument("--base", default="")
+    sl.add_argument("--event", default="", help="the CI event name (push, pull_request, ...)")
+    sl.set_defaults(handler=_cmd_ci_select)
     stp = cs.add_parser(
         "setup", help="run ci.setup, or a subproject's setup, after install (failures warn)"
     )
@@ -430,6 +679,9 @@ def _ci_commands(sub: Any) -> None:
     )
     sp.add_argument("--head", default="")
     sp.add_argument("--sha", default="", help="the head branch's commit; its tree must be tested")
+    sp.add_argument(
+        "--deselect", default="", help="JSON list of pytest markers this run leaves out (ci select)"
+    )
     sp.set_defaults(handler=_cmd_ci_skip_pr)
     dc = cs.add_parser(
         "docs-changed", help="should the docs job run for the change since BASE? (true/false)"
@@ -440,12 +692,21 @@ def _ci_commands(sub: Any) -> None:
         "record-tested", help="record HEAD's tree as tested, with the CI legs in --legs"
     )
     rt.add_argument("--legs", required=True)
+    rt.add_argument("--deselect", default="", help="JSON list of pytest markers the run left out")
     rt.set_defaults(handler=_cmd_ci_record_tested)
     ru = cs.add_parser(
         "reuse", help="was HEAD's tree already tested by a pull request? (true/false)"
     )
     ru.add_argument("--matrix", required=True, help="the CI matrix JSON this run would use")
     ru.add_argument("--out", required=True, help="directory to write the recorded legs to")
+    ru.add_argument(
+        "--deselect", default="", help="JSON list of pytest markers this run leaves out (ci select)"
+    )
+    ru.add_argument(
+        "--no-local",
+        action="store_true",
+        help="refuse local records even with ci.accept-local-tested (a releasing push)",
+    )
     ru.set_defaults(handler=_cmd_ci_reuse)
     dt = cs.add_parser("drop-tested", help="delete the record for HEAD's tree")
     dt.set_defaults(handler=_cmd_ci_drop_tested)

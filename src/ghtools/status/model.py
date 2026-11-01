@@ -7,6 +7,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from .. import components
 from ..config import Config
 from ..templates import render
 
@@ -16,6 +17,7 @@ PANEL_GAP, PANEL_ROW = 40, 110
 LINK_CHAR_W, LINK_GAP = 8.8, 24  # 16px sans-serif, approximate
 # Text budgets, so nothing runs past its card or into its neighbour (13px mono ≈ 7.8 px/char,
 # 22px mono ≈ 13.2 px/char, 13px sans ≈ 7.5 px/char).
+BLOCK_W, BLOCK_H, BLOCK_GAP, BLOCK_NAME_CHARS = 190, 112, 20, 17
 DETAIL_CHARS, VALUE_CHARS, ITEM_LABEL_CHARS = 22, 14, 16
 VALUE_CHAR_W, ITEM_LABEL_CHAR_W, ITEM_GAP = 13.2, 7.5, 24
 
@@ -141,6 +143,63 @@ def _card(kind: str, data: dict[str, dict[str, Any]], cfg: Config) -> dict[str, 
     return None
 
 
+def _result(status: str, ok: str, bad: str) -> dict[str, str]:
+    """One block row's value and colour class for a passing, failing or unknown status."""
+    if status == "passing":
+        return {"value": ok, "state": "pass"}
+    if status == "failing":
+        return {"value": bad, "state": "fail"}
+    return {"value": "not run", "state": "muted"}
+
+
+def _tests_result(leg: dict[str, Any] | None) -> dict[str, str]:
+    """A component's last test result, from its (possibly carried over) subproject leg."""
+    if not leg:
+        return _result("", "", "")
+    tests = leg.get("tests") or {}
+    if leg.get("status") == "failing" or tests.get("failed"):
+        failed = tests.get("failed", 0)
+        return {"value": f"✗ {failed} failed" if failed else "✗ Failing", "state": "fail"}
+    return {"value": f"✓ {tests['total']}" if tests.get("total") else "✓ Passed", "state": "pass"}
+
+
+def _blocks(data: dict[str, dict[str, Any]], cfg: Config) -> list[dict[str, Any]]:
+    """The components layout: a top block for the repo, then one per released component.
+
+    A component block is ``{name, version, tests}`` and the block titled ``Repository`` is
+    ``{name, version, lint, docs}``; ``tests``, ``lint`` and ``docs`` are ``{value, state}``.
+    Docs appear only on the repo block, since the docs build is not per component. A component
+    that has never been tagged has ``version == ""`` (the card says "not released").
+    Results for components a run did not touch were
+    carried over from the previous CI fragment by :func:`..fragments.ci_fragment`.
+    """
+    ci, project = data.get("ci", {}), data.get("project", {})
+    docs = _result((data.get("docs") or {}).get("build", ""), "✓ Built", "✗ Failing")
+    lint = _result((ci.get("lint") or {}).get("status", ""), "✓ Clean", "✗ Failing")
+    versions = {c["name"]: c.get("version", "") for c in project.get("components") or []}
+    legs = ci.get("subproject_legs") or {}
+    blocks: list[dict[str, Any]] = [
+        {
+            "name": "Repository",
+            "version": project.get("version", ""),
+            "lint": lint,
+            "docs": docs,
+        }
+    ]
+    for c in components.released(cfg):
+        blocks.append(
+            {
+                "name": _clip(c.name, BLOCK_NAME_CHARS),
+                "version": versions.get(c.name, ""),
+                "tests": _tests_result(legs.get(c.name)),
+            }
+        )
+    for i, block in enumerate(blocks):
+        block["x"] = 35 + (i % 4) * (BLOCK_W + BLOCK_GAP)
+        block["y"] = i // 4  # row index until the caller knows where the first row starts
+    return blocks
+
+
 def _panels(
     data: dict[str, dict[str, Any]], cfg: Config, top: int
 ) -> tuple[list[dict[str, Any]], int]:
@@ -217,22 +276,32 @@ def build_model(data: dict[str, dict[str, Any]], cfg: Config, root: Path) -> dic
             lx += int(len(names[key]) * LINK_CHAR_W) + LINK_GAP
     label_y = (links_y if links else links_y - 30) + 45
     cards: list[dict[str, Any]] = []
-    for i, kind in enumerate(k for k in cfg.get("status.card") if _card(k, data, cfg)):
+    blocks: list[dict[str, Any]] = []
+    layout_cards = cfg.get("status.card") if cfg.get("status.layout") == "single" else []
+    if cfg.get("status.layout") == "components":
+        blocks = _blocks(data, cfg)
+        for block in blocks:
+            block["y"] = label_y + 18 + block["y"] * (BLOCK_H + BLOCK_GAP)
+    for i, kind in enumerate(k for k in layout_cards if _card(k, data, cfg)):
         card = _card(kind, data, cfg)
         card["detail"] = _clip(card["detail"], DETAIL_CHARS)
         card["x"] = 35 + (i % 4) * (CARD_W + CARD_GAP)
         card["y"] = label_y + 18 + (i // 4) * CARD_ROW
         cards.append(card)
     after_cards = (cards[-1]["y"] + CARD_H + 40) if cards else label_y - 10
+    if blocks:
+        after_cards = blocks[-1]["y"] + BLOCK_H + 40
     panels, bottom = _panels(data, cfg, after_cards)
     height = (
         (bottom + 30) if panels else ((cards[-1]["y"] + CARD_H + 30) if cards else links_y + 30)
     )
+    if blocks and not panels:
+        height = blocks[-1]["y"] + BLOCK_H + 30
     updated = max(
         (f.get("updated", "") for f in data.values() if isinstance(f.get("updated"), str)),
         default="",
     )
-    return {
+    model = {
         "width": 900,
         "height": max(height, 140),
         "name": project.get("name", ""),
@@ -247,6 +316,9 @@ def build_model(data: dict[str, dict[str, Any]], cfg: Config, root: Path) -> dic
         "panels": panels,
         "updated": updated,
     }
+    if blocks:
+        model["blocks"] = blocks
+    return model
 
 
 def _escape_model(value: Any) -> Any:

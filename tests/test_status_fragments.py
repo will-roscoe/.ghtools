@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ghtools import config
@@ -266,3 +268,23 @@ def test_an_umbrellas_lint_comes_from_its_lint_only_leg():
     assert frag["lint"]["status"] == "passing"
     assert frag["tests"]["passed"] == 3  # still the subprojects' sum
     assert frag["python"] == [{"version": "3.12", "status": "passing"}]
+
+
+def test_local_legs_paint_no_builds_row():
+    from ghtools.status import fragments as fr
+
+    local = fr.leg(
+        "3.12", "local", "success", "success", fr.parse_junit(Path("/none")), None, False, None
+    )
+    assert fr.ci_fragment([local], [])["builds"] == {}
+    ci = fr.leg(
+        "3.12",
+        "ubuntu-latest",
+        "success",
+        "success",
+        fr.parse_junit(Path("/none")),
+        None,
+        True,
+        None,
+    )
+    assert fr.ci_fragment([local, ci], [])["builds"] == {"Linux": {"x86_64": "passing"}}
