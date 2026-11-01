@@ -104,6 +104,17 @@ def lookup(root: Path, out_dir: Path, matrix: dict[str, Any], remote: str = "ori
     return True
 
 
+def is_tested(root: Path, rev: str, remote: str = "origin") -> bool:
+    """Is the tree of `rev` recorded under refs/ghtools/tested/? Any doubt (unknown rev, no
+    remote, fetch failure) returns False."""
+    try:
+        tree = tree_sha(Path(root), rev)
+        _git_in(root, "fetch", "--quiet", "--no-tags", "--depth=1", remote, ref_for(tree))
+    except (PreconditionError, subprocess.SubprocessError, OSError):
+        return False
+    return True
+
+
 def drop(root: Path, remote: str = "origin") -> None:
     """Delete the record for HEAD's tree (it has been used); a missing record is not an error."""
     subprocess.run(

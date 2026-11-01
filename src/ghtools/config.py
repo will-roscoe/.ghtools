@@ -58,7 +58,8 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "test": Field(str, "pytest -q"),
         "paths": Field(list, ["**.py", "pyproject.toml"]),
         # Pull requests whose head branch is listed skip CI (tests, gates, docker, lint legs);
-        # their commits were already tested as pull requests into that branch.
+        # their commits were tested as pull requests into that branch (checked: the head tree
+        # must have a refs/ghtools/tested ref).
         "skip-pr-heads": Field(list, []),
         # On a push to the default branch, skip CI when the pushed tree was already tested and
         # passed on a same-repo pull request (recorded under refs/ghtools/tested/); the recorded
