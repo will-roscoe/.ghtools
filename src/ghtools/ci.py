@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from .config import CONFIG_PATH, Config
@@ -56,7 +57,30 @@ def install_command(cfg: Config, subproject: str | None = None) -> list[str]:
     return [python(), "-m", "pip", "install", *shlex.split(cfg.get("ci.install"))]
 
 
-def test_command(cfg: Config, subproject: str | None = None) -> str:
+def _marker_expr(deselect: Sequence[str], existing: str | None = None) -> str:
+    """A pytest ``-m`` expression leaving out `deselect`, and-joined with `existing` if given."""
+    nots = " and ".join(f"not {m}" for m in deselect)
+    return f"({existing}) and {nots}" if existing else nots
+
+
+def _with_marker(words: list[str], deselect: Sequence[str]) -> list[str]:
+    """`words` (a pytest command) with `deselect` added to its ``-m`` expression, or a new one."""
+    for i, w in enumerate(words):
+        if w == "-m" and i + 1 < len(words):
+            return [*words[: i + 1], _marker_expr(deselect, words[i + 1]), *words[i + 2 :]]
+        if w.startswith("-m") and not w.startswith("--") and len(w) > 2:
+            return [*words[:i], "-m", _marker_expr(deselect, w[2:]), *words[i + 1 :]]
+    return [*words, "-m", _marker_expr(deselect)]
+
+
+def test_command(cfg: Config, subproject: str | None = None, deselect: Sequence[str] = ()) -> str:
+    """The shell command CI runs for tests (the root's, or `subproject`'s).
+
+    `deselect` lists pytest markers to leave out (see :func:`ghtools.selection.deselected`); each
+    becomes ``not <marker>``, and-joined into one ``-m`` expression with any ``-m`` already in
+    ``ci.test``. Empty `deselect` gives the command unchanged. A root ``ci.test`` that is not
+    pytest is returned as is.
+    """
     if subproject:
         # Run from the repo root so coverage paths stay repo-relative across legs.
         row = _subproject(cfg, subproject)
@@ -64,11 +88,15 @@ def test_command(cfg: Config, subproject: str | None = None) -> str:
         if row["package"]:
             parts += [f"--cov={row['package']}", "--cov-report=xml:coverage.xml"]
         parts += ["--junitxml=junit.xml", "-o", "junit_family=legacy"]
+        if deselect:
+            parts += ["-m", _marker_expr(deselect)]
         return " ".join(shlex.quote(p) for p in parts)
     base = cfg.get("ci.test")
     words = shlex.split(base)
     if not (words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]):
         return base
+    if deselect:
+        base = shlex.join(_with_marker(words, deselect))
     extra: list[str] = []
     package = cfg.get("ci.coverage.package")
     if package:

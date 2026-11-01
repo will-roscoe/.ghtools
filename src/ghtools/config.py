@@ -65,6 +65,8 @@ SCHEMA: dict[str, dict[str, Field]] = {
         # passed on a same-repo pull request (recorded under refs/ghtools/tested/); the recorded
         # results still feed the status card.
         "reuse-pr-results": Field(bool, False),
+        # Events (push, pull_request, ...) that always run the full selection, ignoring ci.select.
+        "select-full-on": Field(list, []),
         "gates": Field(list, ["ruff", "ruff-format"]),
         "docker": Field(bool, False),
         "setup": Field(list, []),  # commands run after install, before gates and tests
@@ -133,6 +135,10 @@ TABLE_ARRAYS: dict[str, dict[str, Field]] = {
         "name": Field(str, None),
         "run": Field(str, None),
         "after": Field(str, "test", _c("test", "docs")),
+    },
+    "ci.select": {  # leave a pytest marker out unless the change touches `changed`
+        "marker": Field(str, None),
+        "changed": Field(list, None),
     },
     "readme.block": {
         "name": Field(str, None),
@@ -321,6 +327,15 @@ def _cross_checks(cfg: Config) -> None:
             raise ConfigError(f"readme.block[{i}].heading-offset: must be between -1 and 2")
         if block["kind"] == "sync" and not block["source"]:
             raise ConfigError(f"readme.block[{i}].source: required for kind = 'sync'")
+    for i, row in enumerate(cfg.get("ci.select")):
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", row["marker"]):
+            raise ConfigError(
+                f"ci.select[{i}].marker: {row['marker']!r} must be a plain pytest marker name"
+            )
+        if not row["changed"]:
+            raise ConfigError(f"ci.select[{i}].changed: must not be empty")
+    if cfg.get("ci.select") and not is_pytest:
+        raise ConfigError("ci.select needs ci.test to run pytest (it works by passing -m)")
     if cfg.get("ci.coverage.threshold") < 0:
         raise ConfigError("ci.coverage.threshold: must not be negative")
     if cfg.get("ci.coverage.uploads-per-day") < 0:

@@ -261,12 +261,15 @@ def _cmd_ci_test(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
-    command = ci.test_command(_config.load(root), args.subproject)
-    if args.subproject:
+    deselect = json.loads(args.deselect) if args.deselect else []
+    command = ci.test_command(_config.load(root), args.subproject, deselect)
+    if args.subproject or deselect:
+        # Deselecting can leave nothing to collect (pytest exit 5): not a failure.
+        what = args.subproject or "the repo"
         proc = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root)
         if proc.returncode == 5:  # pytest collected nothing: a subproject without tests
             prefix = "::notice::" if os.environ.get("GITHUB_ACTIONS") == "true" else ""
-            print(f"{prefix}no tests collected for {args.subproject}", flush=True)
+            print(f"{prefix}no tests collected for {what}", flush=True)
             return 0
         if proc.returncode != 0:
             from .errors import CheckFailed
@@ -274,6 +277,16 @@ def _cmd_ci_test(args: Any) -> int:
             raise CheckFailed(f"tests failed (exit {proc.returncode})")
         return 0
     return _run_checked(command, root, "tests")
+
+
+def _cmd_ci_select(args: Any) -> int:
+    from . import selection
+    from .gitutil import changed_files
+
+    root = repo_dir(args)
+    cfg = _config.load(root)
+    print(json.dumps(selection.deselected(cfg, changed_files(args.base, root), args.event)))
+    return 0
 
 
 def _cmd_ci_skip_pr(args: Any) -> int:
@@ -415,7 +428,16 @@ def _ci_commands(sub: Any) -> None:
     ins.set_defaults(handler=_cmd_ci_install)
     tst = cs.add_parser("test", help="run ci.test (or a subproject's tests) with coverage/junit")
     tst.add_argument("--subproject", default=None)
+    tst.add_argument(
+        "--deselect", default="", help="JSON list of pytest markers to leave out (ci select)"
+    )
     tst.set_defaults(handler=_cmd_ci_test)
+    sl = cs.add_parser(
+        "select", help="pytest markers to leave out for this change (ci.select), as a JSON list"
+    )
+    sl.add_argument("--base", default="")
+    sl.add_argument("--event", default="", help="the CI event name (push, pull_request, ...)")
+    sl.set_defaults(handler=_cmd_ci_select)
     stp = cs.add_parser(
         "setup", help="run ci.setup, or a subproject's setup, after install (failures warn)"
     )
