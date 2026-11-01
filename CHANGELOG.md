@@ -6,6 +6,44 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-11-01
+
+### Features
+
+- **ci**: path-conditional test selection with ci.select
+- **ci**: tested records store the selection and their source
+- **ci**: record a local test run as tested
+- **ci**: wire test selection through the pipeline
+- **config**: released components on subprojects
+- **release**: decide and prepare per-component releases
+- **release**: release-components job and scoped docs
+- **status**: components layout
+
+### Bug fixes
+
+- **ci**: append deselect markers without rewriting ci.test
+- **ci**: a record only claims the selection it was given
+- **ci**: local records never downgrade or overwrite a full one
+- **release**: clear version-file errors and no component downgrade
+- **release**: component job publishes only what it decided
+- **status**: clearer component blocks
+- **ci**: test and fully select any run that can release
+- **ci**: local records cover the lint gates
+- **config**: component tag templates need {name}
+- **ci**: a releasing push never reuses a local record
+
+### Documentation
+
+- **readme**: state the limits of test selection and local records
+- agent usage guide and components
+- selection, local records and component adoption
+- local record route and selection pitfalls
+
+### Tests
+
+- **compat**: golden outputs for existing repo configs
+- **compat**: cover in-tree selection in the goldens
+
 ## [1.9.1] - 2026-11-01
 
 ### Bug fixes
