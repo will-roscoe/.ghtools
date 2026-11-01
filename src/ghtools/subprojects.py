@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from .config import Config, in_tree
+from .errors import ConfigError
 from .gitutil import submodules
 from .runners import Note, resolve_leg, resolve_matrix
 
@@ -55,10 +57,13 @@ def matrix(
     head: str,
     force: bool = False,
     notes: list[Note] | None = None,
+    also: Sequence[str] = (),
 ) -> tuple[dict[str, Any], bool]:
     """The CI matrix and whether it has any real leg; runners are resolved per leg.
 
-    Runner changes and dropped legs are appended to ``notes`` when given.
+    Runner changes and dropped legs are appended to ``notes`` when given. `also` names in-tree
+    subprojects tested whatever the diff says (components due for release); an unknown name raises
+    :class:`~ghtools.errors.ConfigError`.
     """
     notes = [] if notes is None else notes
     include: list[dict[str, Any]] = []
@@ -70,6 +75,9 @@ def matrix(
         # force (a `[ci]` directive): every subproject, as when the diff is unknown.
         picked = select(cfg, None if force else changed_between(Path(root), base, head))
         by_name = {r["name"]: r for r in rows}
+        if unknown := sorted(set(also) - set(by_name)):
+            raise ConfigError(f"ci matrix --also: no in-tree subproject {', '.join(unknown)}")
+        picked = [n for n in by_name if n in picked or n in also]
         python, label = cfg.get("ci.python")[-1], cfg.get("ci.runners")[0]
         runner, note = resolve_leg(python, label)
         if note and note not in notes:

@@ -115,9 +115,9 @@ loads. ghtools imposes no particular extension.
   commit), a fork PR, a CI-forcing directive (`[ci]`, `[test]`, `[lint]`, ... with `directives.enabled`) or
   any doubt runs every leg with nothing reused. A directive, a push that would release the root, and a
   push with a component due a release also deselect nothing (below).
-- A run that can release is tested in full. When a component is due, the run also tests every in-tree
-  subproject, not only the touched ones, and runs CI even if no `ci.paths` file changed, as a releasing
-  root does. The reuse step still applies to them as it does to the root.
+- A run that can release is tested in full. When a component is due, the run also tests that component
+  (and what the push touched), not unrelated subprojects, and runs CI even if no `ci.paths` file changed,
+  as a releasing root does. The reuse step still applies to them as it does to the root.
 - `[[ci.select]]` rules (`marker`, `changed` globs) end `ci test` with `-m "not <marker>"` when no
   changed file matches. No rules, an unknown base, a computed merge base equal to HEAD, or an event in
   `ci.select-full-on` deselects nothing, and neither does a push that is forced by a directive, would

@@ -153,7 +153,12 @@ jobs:
           COMPONENTS: ${{ steps.components.outputs.components }}
         run: |
           args=(--base "$BASE" --head "$HEAD" --github-output)
-          if [ "$FORCE_CI" = "true" ] || { [ -n "$COMPONENTS" ] && [ "$COMPONENTS" != "[]" ]; }; then args+=(--all); fi
+          if [ "$FORCE_CI" = "true" ]; then args+=(--all); fi
+          # A component due for release is tested in this run even if this push did not touch it.
+          if [ -n "$COMPONENTS" ] && [ "$COMPONENTS" != "[]" ]; then
+            mapfile -t due < <(jq -r '.[].name' <<< "$COMPONENTS")
+            args+=(--also "${due[@]}")
+          fi
           ghtools ci matrix "${args[@]}"
       - name: Did a pull request already test this tree?
         # ci.reuse-pr-results: a push to the default branch whose tree a passing pull request run
