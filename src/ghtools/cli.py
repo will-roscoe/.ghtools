@@ -261,6 +261,12 @@ def _cmd_ci_test(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
+    if args.record:
+        return _record_local_run(args, root)
+    if args.base:
+        from .errors import PreconditionError
+
+        raise PreconditionError("--base only applies with --record")
     deselect = json.loads(args.deselect) if args.deselect else []
     command = ci.test_command(_config.load(root), args.subproject, deselect)
     if args.subproject or deselect:
@@ -277,6 +283,83 @@ def _cmd_ci_test(args: Any) -> int:
             raise CheckFailed(f"tests failed (exit {proc.returncode})")
         return 0
     return _run_checked(command, root, "tests")
+
+
+def _record_local_run(args: Any, root: Path) -> int:
+    """`ci test --record`: run the tests, then publish a tested record for HEAD's tree.
+
+    Refuses, before running anything, a tree with uncommitted or untracked files (the record
+    claims HEAD's tree passed) and a repo with no `origin`. Tests only what `--subproject` names, or
+    else the root (profile python) and every in-tree subproject. The markers left out are
+    :func:`ghtools.selection.deselected` against `--base` (default: merge-base with
+    ``origin/<branch>``; unknown means a full run); `--deselect` is ignored. Nothing is recorded
+    unless every leg passes and the tree is still untouched. Prints the ref. Raises
+    PreconditionError or CheckFailed.
+    """
+    from . import ci, reuse, selection
+    from .errors import CheckFailed, PreconditionError
+    from .status import fragments as fr
+
+    def dirty(untracked: str) -> str:
+        return gitutil.git(
+            "status", "--porcelain", f"--untracked-files={untracked}", cwd=root
+        ).strip()
+
+    if dirty("all"):
+        raise PreconditionError("refusing to record: the working tree has uncommitted changes")
+    if gitutil.git("remote", "get-url", "origin", cwd=root, check=False).strip() == "":
+        raise PreconditionError("refusing to record: no 'origin' remote to push the record to")
+    head = reuse.tree_sha(root)
+    cfg = _config.load(root)
+    base = args.base
+    if not base:
+        base = gitutil.git(
+            "merge-base", "HEAD", f"origin/{cfg.get('branch')}", cwd=root, check=False
+        ).strip()
+    deselect = selection.deselected(cfg, gitutil.changed_files(base, root), "local")
+    if args.subproject:
+        names = [args.subproject]
+    else:
+        names = [""] if cfg.get("profile") == "python" else []
+        names += [row["name"] for row in _config.in_tree(cfg)]
+    if not names:
+        raise PreconditionError("nothing to test: profile is not python and no in-tree subprojects")
+    python = f"{sys.version_info.major}.{sys.version_info.minor}"
+    legs: dict[str, dict[str, Any]] = {}
+    for name in names:
+        for out in ("junit.xml", "coverage.xml"):  # a stale report must not describe this leg
+            if not gitutil.git("ls-files", out, cwd=root).strip():
+                (root / out).unlink(missing_ok=True)
+        what = name or "the repo"
+        command = ci.test_command(cfg, name or None, deselect)
+        print(f"ghtools: testing {what}", flush=True)
+        proc = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root)
+        if proc.returncode == 5 and (name or deselect):
+            print(f"no tests collected for {what}", flush=True)
+        elif proc.returncode != 0:
+            raise CheckFailed(f"tests failed for {what} (exit {proc.returncode}); nothing recorded")
+        legs[name or "root"] = fr.leg(
+            python,
+            "local",
+            "success",
+            "",
+            fr.parse_junit(root / "junit.xml"),
+            fr.parse_coverage_xml(root / "coverage.xml"),
+            False,
+            None,
+            subproject=name,
+        )
+    if reuse.tree_sha(root) != head or dirty("no"):
+        raise PreconditionError("refusing to record: the tests changed the tree they ran on")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for key, leg in legs.items():
+            d = Path(tmp) / f"ghtools-status-leg-{key}"
+            d.mkdir()
+            (d / "status-leg.json").write_text(json.dumps(leg))
+        print(reuse.record(root, Path(tmp), meta={"source": "local", "deselected": deselect}))
+    return 0
 
 
 def _cmd_ci_select(args: Any) -> int:
@@ -446,6 +529,14 @@ def _ci_commands(sub: Any) -> None:
     tst.add_argument("--subproject", default=None)
     tst.add_argument(
         "--deselect", default="", help="JSON list of pytest markers to leave out (ci select)"
+    )
+    tst.add_argument(
+        "--record",
+        action="store_true",
+        help="after a pass, push a local 'tested' record for this tree (needs a clean tree)",
+    )
+    tst.add_argument(
+        "--base", default="", help="with --record: the revision to select against (default: origin)"
     )
     tst.set_defaults(handler=_cmd_ci_test)
     sl = cs.add_parser(
