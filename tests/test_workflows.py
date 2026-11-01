@@ -479,3 +479,38 @@ def test_record_tested_job_is_same_repo_pr_only_and_never_fails_the_run():
     assert "pull_request.head.repo.full_name == github.repository" in job["if"]
     assert "reuse" in job["if"] and "tests-passed.result == 'success'" in job["if"]
     assert job["permissions"] == {"contents": "write"}
+
+
+def _select_steps(job):
+    return [s for s in job["steps"] if "--deselect" in s.get("run", "")]
+
+
+def test_deselect_only_with_rules():
+    doc = _pipeline()
+    config_job = doc["jobs"]["config"]
+    step = next(s for s in config_job["steps"] if s.get("id") == "select")
+    # The select step exists only for a repo with rules; the output is empty otherwise.
+    assert ").select" in step["if"] and "ghtools ci select" in step["run"]
+    assert config_job["outputs"]["deselect"] == "${{ steps.select.outputs.deselect }}"
+    # It runs before the steps that read the selection.
+    ids = [s.get("id") for s in config_job["steps"]]
+    assert ids.index("select") < ids.index("paths") < ids.index("reuse")
+    # Every consumer passes --deselect only when there is a selection to pass.
+    for job, name in (("config", "paths"), ("config", "reuse")):
+        s = next(s for s in doc["jobs"][job]["steps"] if s.get("id") == name)
+        assert 'if [ -n "$DESELECT" ]' in s["run"] and "--deselect" in s["run"]
+    test_run = next(s for s in doc["jobs"]["test"]["steps"] if s.get("id") == "test")["run"]
+    assert '"$DESELECT" != "[]"' in test_run
+    rec = next(
+        s for s in doc["jobs"]["record-tested"]["steps"] if "record-tested" in s.get("run", "")
+    )
+    # record-tested passes "[]" too: that is a claimed full run, which reuse then accepts.
+    assert 'if [ -n "$DESELECT" ]' in rec["run"] and '!= "[]"' not in rec["run"]
+
+
+def test_export_flags_rules_only_when_set():
+    from ghtools import config
+
+    assert config.export(config.from_dict({}))["select"] is False
+    cfg = config.from_dict({"ci": {"select": [{"marker": "tui", "changed": ["src/**"]}]}})
+    assert config.export(cfg)["select"] is True

@@ -44,6 +44,8 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       any: ${{ steps.matrix.outputs.any }}
       dispatch: ${{ steps.directives.outputs.dispatch || '[]' }}
+      # ci.select: JSON list of pytest markers this change leaves out; empty when the repo has no rules.
+      deselect: ${{ steps.select.outputs.deselect }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,6 +81,20 @@ jobs:
         env:
           BEFORE: ${{ github.event.before }}
         run: ghtools directives resolve --before "$BEFORE" --github-output
+      - name: Which tests can this change skip?
+        # Only with [[ci.select]] rules. Git has the full history here; an unknown or unresolvable
+        # base, or an event other than push and pull_request, leaves nothing deselected.
+        id: select
+        if: fromJSON(steps.export.outputs.config).select
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "$EVENT" = "push" ] && { [ -z "$BASE" ] || [ -z "${BASE//0/}" ]; }; then
+            BASE="$(git rev-parse --verify -q 'HEAD^1' || true)"
+          fi
+          deselect="$(ghtools ci select --base "$BASE" --event "$EVENT")"
+          echo "deselect=$deselect" >> "$GITHUB_OUTPUT"
       - name: Should CI run?
         id: paths
         env:
@@ -88,8 +104,11 @@ jobs:
           FORCE_CI: ${{ steps.directives.outputs.force-ci }}
           HEAD_REF: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DESELECT: ${{ steps.select.outputs.deselect }}
         run: |
-          if [ "$EVENT" = "pull_request" ] && [ "$(ghtools ci skip-pr --head "$HEAD_REF" --sha "$HEAD_SHA")" = "true" ]; then
+          skip_args=()
+          if [ -n "$DESELECT" ]; then skip_args+=(--deselect "$DESELECT"); fi
+          if [ "$EVENT" = "pull_request" ] && [ "$(ghtools ci skip-pr --head "$HEAD_REF" --sha "$HEAD_SHA" "${skip_args[@]}")" = "true" ]; then
             echo "run-ci=false" >> "$GITHUB_OUTPUT"
           elif [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ] || [ "$FORCE_CI" = "true" ]; then
             echo "run-ci=true" >> "$GITHUB_OUTPUT"
@@ -125,8 +144,11 @@ jobs:
         if: steps.ref.outputs.default-ref == 'true' && steps.paths.outputs.run-ci == 'true' && steps.directives.outputs.force-ci != 'true' && fromJSON(steps.export.outputs.config).reuse
         env:
           MATRIX: ${{ steps.matrix.outputs.matrix }}
+          DESELECT: ${{ steps.select.outputs.deselect }}
         run: |
-          reused="$(ghtools ci reuse --matrix "$MATRIX" --out "$RUNNER_TEMP/reused-legs")"
+          reuse_args=()
+          if [ -n "$DESELECT" ]; then reuse_args+=(--deselect "$DESELECT"); fi
+          reused="$(ghtools ci reuse --matrix "$MATRIX" --out "$RUNNER_TEMP/reused-legs" "${reuse_args[@]}")"
           echo "reused=$reused" >> "$GITHUB_OUTPUT"
           if [ "$reused" = "true" ]; then
             echo "::notice title=CI reused::this tree passed CI on a pull request; tests not re-run"
@@ -215,8 +237,12 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           SUBPROJECT: ${{ matrix.subproject }}
+          DESELECT: ${{ needs.config.outputs.deselect }}
         run: |
-          if [ -n "$SUBPROJECT" ]; then ghtools ci test --subproject "$SUBPROJECT"; else ghtools ci test; fi
+          args=()
+          if [ -n "$SUBPROJECT" ]; then args+=(--subproject "$SUBPROJECT"); fi
+          if [ -n "$DESELECT" ] && [ "$DESELECT" != "[]" ]; then args+=(--deselect "$DESELECT"); fi
+          ghtools ci test "${args[@]}"
       - name: Codecov token missing
         if: ${{ !cancelled() && strategy.job-index == 0 && fromJSON(needs.config.outputs.config).codecov && env.HAS_CODECOV_TOKEN != 'true' && needs.config.outputs.code-changed == 'true' }}
         run: >-
@@ -334,7 +360,13 @@ jobs:
           pattern: ghtools-status-leg-*
           path: ${{ runner.temp }}/legs
       - name: Record the tested tree
-        run: ghtools ci record-tested --legs "$RUNNER_TEMP/legs"
+        env:
+          DESELECT: ${{ needs.config.outputs.deselect }}
+        run: |
+          # With rules, always say which selection the legs ran with ("[]" is a claimed full run).
+          args=()
+          if [ -n "$DESELECT" ]; then args+=(--deselect "$DESELECT"); fi
+          ghtools ci record-tested --legs "$RUNNER_TEMP/legs" "${args[@]}"
 
   docker:
     needs: config

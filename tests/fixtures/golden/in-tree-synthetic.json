@@ -1,0 +1,315 @@
+{
+  "install_command": {
+    "": [
+      "<python>",
+      "-m",
+      "pip",
+      "install",
+      "-e",
+      ".[dev]"
+    ],
+    "app": [
+      "<python>",
+      "-m",
+      "pip",
+      "install",
+      "-e",
+      "./libs/core[dev]",
+      "-e",
+      "./libs/mid",
+      "-e",
+      "./apps/app[test]",
+      "pytest",
+      "pytest-cov"
+    ],
+    "core": [
+      "<python>",
+      "-m",
+      "pip",
+      "install",
+      "-e",
+      "./libs/core[dev]",
+      "pytest",
+      "pytest-cov"
+    ],
+    "mid": [
+      "<python>",
+      "-m",
+      "pip",
+      "install",
+      "-e",
+      "./libs/core[dev]",
+      "-e",
+      "./libs/mid",
+      "pytest",
+      "pytest-cov"
+    ]
+  },
+  "matrix": {
+    "all (no diff)": [
+      {
+        "include": [
+          {
+            "python": "3.12",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "package": "core",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "core",
+            "tests": "libs/core/tests"
+          },
+          {
+            "package": "mid",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "mid",
+            "tests": "libs/mid/tests"
+          },
+          {
+            "package": "app",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "app",
+            "tests": ""
+          }
+        ]
+      },
+      true
+    ],
+    "forced": [
+      {
+        "include": [
+          {
+            "python": "3.12",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "package": "core",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "core",
+            "tests": "libs/core/tests"
+          },
+          {
+            "package": "mid",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "mid",
+            "tests": "libs/mid/tests"
+          },
+          {
+            "package": "app",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "app",
+            "tests": ""
+          }
+        ]
+      },
+      true
+    ],
+    "since tag": [
+      {
+        "include": [
+          {
+            "python": "3.12",
+            "runner": "ubuntu-latest"
+          },
+          {
+            "package": "core",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "core",
+            "tests": "libs/core/tests"
+          },
+          {
+            "package": "mid",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "mid",
+            "tests": "libs/mid/tests"
+          },
+          {
+            "package": "app",
+            "python": "3.12",
+            "runner": "ubuntu-latest",
+            "subproject": "app",
+            "tests": ""
+          }
+        ]
+      },
+      true
+    ]
+  },
+  "release_decide": {
+    "current": "v1.0.0",
+    "reason": "v1.0.0 -> v1.1.0",
+    "released": "true",
+    "resume": "false",
+    "tag": "v1.1.0",
+    "version": "1.1.0"
+  },
+  "select": {
+    "empty": [],
+    "global .github/ghtools.toml": [
+      "core",
+      "mid",
+      "app"
+    ],
+    "global .github/workflows/ghtools.yml": [
+      "core",
+      "mid",
+      "app"
+    ],
+    "global codecov.yml": [
+      "core",
+      "mid",
+      "app"
+    ],
+    "global pyproject.toml": [
+      "core",
+      "mid",
+      "app"
+    ],
+    "in app": [
+      "app"
+    ],
+    "in core": [
+      "core",
+      "mid",
+      "app"
+    ],
+    "in mid": [
+      "mid",
+      "app"
+    ],
+    "none": [
+      "core",
+      "mid",
+      "app"
+    ],
+    "outside every row": [],
+    "src/x.py": []
+  },
+  "setup_commands": {
+    "": [],
+    "app": [],
+    "core": [
+      "python libs/core/setup.py develop"
+    ],
+    "mid": [
+      "python libs/mid/prep.py"
+    ]
+  },
+  "status_model": {
+    "cards": [
+      {
+        "detail": "0 failed · 2 skipped",
+        "state": "pass",
+        "title": "TESTS",
+        "value": "✓ 100",
+        "x": 35,
+        "y": 183
+      },
+      {
+        "detail": "line coverage",
+        "state": "pass",
+        "title": "COVERAGE",
+        "value": "96.8%",
+        "x": 245,
+        "y": 183
+      },
+      {
+        "detail": "ruff",
+        "state": "pass",
+        "title": "LINT",
+        "value": "✓ Clean",
+        "x": 455,
+        "y": 183
+      },
+      {
+        "detail": "100% documented",
+        "state": "pass",
+        "title": "DOCS",
+        "value": "✓ Built",
+        "x": 665,
+        "y": 183
+      }
+    ],
+    "description_lines": [
+      "A demo project used to pin the status card model."
+    ],
+    "height": 423,
+    "label_y": 165,
+    "links": [
+      {
+        "text": "PyPI",
+        "url": "https://pypi.org/project/demo/",
+        "x": 35
+      },
+      {
+        "text": "Documentation",
+        "url": "https://x.github.io/demo",
+        "x": 94
+      },
+      {
+        "text": "Repository",
+        "url": "https://github.com/x/demo",
+        "x": 232
+      }
+    ],
+    "links_y": 120,
+    "logo": "",
+    "name": "demo",
+    "panels": [
+      {
+        "items": [
+          {
+            "status": "passing",
+            "version": "3.11"
+          },
+          {
+            "status": "passing",
+            "version": "3.12"
+          }
+        ],
+        "kind": "python",
+        "label": "PYTHON SUPPORT",
+        "width": 150,
+        "x": 35,
+        "y": 313
+      },
+      {
+        "archs": [
+          "x86_64"
+        ],
+        "kind": "builds",
+        "label": "BUILDS",
+        "oses": [
+          [
+            "Linux",
+            {
+              "x86_64": "passing"
+            }
+          ]
+        ],
+        "width": 130,
+        "x": 225,
+        "y": 313
+      }
+    ],
+    "text_x": 35,
+    "updated": "",
+    "version": "2.3.0",
+    "width": 900
+  },
+  "stub": "# ghtools-stub: 1 — generated by `ghtools init`; settings live in .github/ghtools.toml\nname: ghtools\non:\n  push:\n    branches:\n      - main\n  pull_request:\n  workflow_dispatch:\n    inputs:\n      dry-run:\n        description: Compute the release without writing anything\n        type: boolean\n        default: true\npermissions:\n  contents: write\n  pages: write\n  id-token: write\nconcurrency:\n  group: ghtools-${{ github.ref }}\n  cancel-in-progress: false\njobs:\n  pipeline:\n    uses: will-roscoe/.ghtools/.github/workflows/pipeline.yml@v1\n    with:\n      dry-run: ${{ inputs.dry-run || false }}\n    secrets:\n      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}\n",
+  "test_command": {
+    "": "pytest -q --junitxml=junit.xml -o junit_family=legacy",
+    "app": "python -m pytest apps/app --cov=app --cov-report=xml:coverage.xml --junitxml=junit.xml -o junit_family=legacy",
+    "core": "python -m pytest libs/core/tests --cov=core --cov-report=xml:coverage.xml --junitxml=junit.xml -o junit_family=legacy",
+    "mid": "python -m pytest libs/mid/tests --cov=mid --cov-report=xml:coverage.xml --junitxml=junit.xml -o junit_family=legacy"
+  }
+}

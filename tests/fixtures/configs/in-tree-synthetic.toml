@@ -1,0 +1,34 @@
+# SYNTHETIC fixture: unlike the other files here (copies of real repos' configs), this one is
+# hand-written to exercise in-tree subprojects, which no real repo uses yet.
+branch = "main"
+profile = "python"
+
+[ci]
+python = ["3.12"]
+install = "-e .[dev]"
+
+[[subprojects]]
+name = "core"
+path = "libs/core"
+kind = "in-tree"
+package = "core"
+tests = "libs/core/tests"
+install = ["-e ./libs/core[dev]"]
+setup = ["python libs/core/setup.py develop"]
+
+[[subprojects]]
+name = "mid"
+path = "libs/mid"
+kind = "in-tree"
+package = "mid"
+tests = "libs/mid/tests"
+needs = ["core"]
+setup = ["python libs/mid/prep.py"]
+
+[[subprojects]]
+name = "app"
+path = "apps/app"
+kind = "in-tree"
+package = "app"
+needs = ["mid"]
+install = ["-e ./apps/app[test]"]

@@ -1,0 +1,58 @@
+# ghtools settings: https://github.com/will-roscoe/.ghtools#configuration
+
+branch = "master"                            # the remote's default branch
+profile = "umbrella"                         # .gitmodules with no root package
+
+[release]
+enabled = false                              # no v* tags and no release workflow
+
+[ci]
+python = ["3.12"]                            # as before
+gates = []                                   # each split project lints and tests in its own repository
+
+[docs]
+enabled = false                              # built locally via Dockerfile.docs; tests.yml never built docs
+
+[status]
+enabled = true                               # ghtools publishes the status card to its own branch
+logo = ".github/logo.svg"                      # the card shows the project logo
+
+# Every project except devlibs and epc-calc now lives in its own repository and CI; they are
+# submodules here so the combined Sphinx site and `make test` still cover them locally.
+[[subprojects]]
+name = "coordpy"
+path = "coordpy"
+kind = "submodule"
+
+[[subprojects]]
+name = "eqrel"
+path = "eqrel"
+kind = "submodule"
+
+[[subprojects]]
+name = "scrapetool"
+path = "scrapetool"
+kind = "submodule"
+
+[[subprojects]]
+name = "videoapp_ng"
+path = "videoapp_ng"
+kind = "submodule"
+
+[[subprojects]]
+name = "eclipse_flow"
+path = "eclipse-flow"
+kind = "submodule"
+
+[[subprojects]]
+name = "tramshed_model"
+path = "tramshed-model"
+kind = "submodule"
+
+[[readme.block]]
+name = "status"
+kind = "status"                              # the status card under the title
+
+[[readme.block]]
+name = "overview"
+source = "docs/_shared/overview.rst"         # also included by docs/index.rst
