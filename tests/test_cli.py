@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from ghtools.cli import main, write_github_output
@@ -55,8 +57,9 @@ def test_errors_are_annotations_inside_github_actions(tmp_path, capsys, monkeypa
 # --- ci test --record -------------------------------------------------------------------------
 
 
-def _record_repo(tmp_path, toml, test_cmd="true"):
-    """A repo whose main is pushed to a bare `origin`, with `toml` plus `ci.test` committed."""
+def _record_repo(tmp_path, toml, test_cmd="true", gates="[]"):
+    """A repo whose main is pushed to a bare `origin`, with `toml` plus `ci.test` and `ci.gates`
+    (no gates unless asked) committed."""
     import subprocess
 
     from conftest import GitRepo  # noqa: I001
@@ -65,7 +68,7 @@ def _record_repo(tmp_path, toml, test_cmd="true"):
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
     repo = GitRepo(tmp_path / "repo").init()
     repo.run("remote", "add", "origin", str(remote))
-    body = f'[ci]\ntest = "{test_cmd}"\n' + toml
+    body = f'[ci]\ntest = "{test_cmd}"\ngates = {gates}\n' + toml
     repo.commit("init", {".github/ghtools.toml": body, "a.txt": "a"})
     repo.run("push", "-q", "origin", "main")
     return repo, remote
@@ -308,3 +311,78 @@ def test_record_round_trips_through_lookup(tmp_path, monkeypatch):
     assert reuse.lookup(repo.path, out, m, accept_local=True) is True
     assert len(list(out.glob("*.json"))) == 3
     assert reuse.lookup(repo.path, tmp_path / "out2", m, accept_local=False) is False
+
+
+def _legs_of(remote, ref):
+    import subprocess
+
+    def git(*a):
+        return subprocess.run(
+            ["git", "-C", str(remote), *a], capture_output=True, text=True, check=True
+        ).stdout
+
+    return {
+        n: json.loads(git("show", f"{ref}:legs/{n}"))
+        for n in git("ls-tree", "--name-only", f"{ref}:legs").split()
+    }
+
+
+def test_record_runs_the_lint_gates_and_records_them(tmp_path, monkeypatch):
+    repo, remote = _record_repo(tmp_path, "", gates='["ruff"]')
+    ran = _fake_bash(monkeypatch)
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0
+    assert "ruff" in ran[0] and ran[1] == "true"  # gates first, then the tests
+    (ref,) = _tested_refs(remote)
+    (leg,) = _legs_of(remote, ref).values()
+    assert leg["gates"] == "passing" and leg["runner"] == "local" and not leg["lint_only"]
+
+
+def test_record_with_a_failing_gate_records_nothing(tmp_path, monkeypatch, capsys):
+    repo, remote = _record_repo(tmp_path, "", gates='["ruff"]')
+    ran = _fake_bash(monkeypatch, code=1)
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) != 0
+    assert "nothing recorded" in capsys.readouterr().err
+    assert len(ran) == 1  # the tests never ran
+    assert _tested_refs(remote) == []
+
+
+def test_umbrella_record_has_a_lint_only_leg(tmp_path, monkeypatch):
+    toml = '[[subprojects]]\nname = "a"\npath = "a"\n'
+    repo, remote = _record_repo(tmp_path, toml, gates='["ruff"]')
+    repo.commit(
+        "profile",
+        {
+            ".github/ghtools.toml": (repo.path / ".github/ghtools.toml")
+            .read_text()
+            .replace("[ci]", 'profile = "umbrella"\n[ci]')
+        },
+    )
+    repo.run("push", "-q", "origin", "main")
+    _fake_bash(monkeypatch)
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0
+    (ref,) = _tested_refs(remote)
+    legs = _legs_of(remote, ref)
+    assert {lg["subproject"] for lg in legs.values() if not lg["lint_only"]} == {"a"}
+    assert [lg["gates"] for lg in legs.values() if lg["lint_only"]] == ["passing"]
+
+
+def test_gated_record_round_trips_and_a_gateless_one_is_refused(tmp_path, monkeypatch):
+    from ghtools import config, reuse
+    from ghtools.subprojects import matrix
+
+    repo, remote = _record_repo(tmp_path, "", gates='["ruff"]')
+    _fake_bash(monkeypatch)
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0
+    m, _ = matrix(config.load(repo.path), repo.path, "", "HEAD", force=True)
+    kw = {"accept_local": True, "needs_gates": True}
+    assert reuse.lookup(repo.path, tmp_path / "o1", m, **kw) is True
+    assert reuse.is_tested(repo.path, "HEAD", **kw) is True
+    # The same record minus its gates (as an older local record was written) is refused.
+    leg = {"status": "passing", "subproject": "", "runner": "local", "gates": ""}
+    legs = tmp_path / "legs"
+    (legs / "x").mkdir(parents=True)
+    (legs / "x" / "status-leg.json").write_text(json.dumps(leg))
+    reuse.record(repo.path, legs, meta={"source": "local", "deselected": []})
+    assert reuse.lookup(repo.path, tmp_path / "o2", m, **kw) is False
+    assert reuse.is_tested(repo.path, "HEAD", **kw) is False
+    assert reuse.lookup(repo.path, tmp_path / "o3", m, accept_local=True) is True  # no lint applies

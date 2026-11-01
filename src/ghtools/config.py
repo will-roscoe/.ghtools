@@ -11,6 +11,7 @@ import copy
 import json
 import re
 import shlex
+import string
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,8 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "zip": Field(str, ""),
         "commit": Field(bool, True),
         "changelog": Field(str, "CHANGELOG.md"),
+        # false: the repo itself no longer releases as v{x}; only released components do.
+        "root": Field(bool, True),
     },
     "ci": {
         "python": Field(list, ["3.12"]),
@@ -114,6 +117,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "rows": Field(list, ["python", "builds"], _c("python", "builds", "extra")),
         "links": Field(list, ["pypi", "docs", "repo"], _c("pypi", "docs", "repo")),
         "logo": Field(str, ""),
+        # "components": a block per released component (name, version, tests, docs) replaces
+        # the quality cards; "single" is the card every repo had before components existed.
+        "layout": Field(str, "single", _c("single", "components")),
         "extra": Field(list, []),
         "badges": Field(
             list,
@@ -159,6 +165,15 @@ TABLE_ARRAYS: dict[str, dict[str, Field]] = {
         "install": Field(list, []),
         "needs": Field(list, []),
         "setup": Field(list, []),
+        # Released components (see ghtools.components); all opt-in.
+        "release": Field(bool, False),
+        "version-file": Field(str, ""),  # "" -> "<path>/pyproject.toml"
+        "changelog": Field(str, ""),  # "" -> "<path>/CHANGELOG.md"
+        "tag": Field(str, "{name}/{version}"),
+        "apidoc": Field(list, []),
+        "docs-paths": Field(list, []),
+        # Runs verbatim instead of pytest; "tests" is a pytest path, not a command.
+        "test-command": Field(str, ""),
     },
 }
 
@@ -391,6 +406,32 @@ def _is_compound(command: str) -> bool:
         return False
 
 
+def _check_tag(where: str, template: str, need_name: bool = False) -> None:
+    """Reject a tag template lacking ``{version}`` or using fields beyond name and version.
+
+    With `need_name` (a released component) it must also contain ``{name}``: without it the tags
+    collide with the root's ``v{version}`` tags or with another component's.
+    """
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except ValueError as exc:
+        raise ConfigError(f"{where}: {template!r} is not a valid template ({exc})") from None
+    fields = [f for _, f, _, _ in parsed if f is not None]
+    unknown = sorted({f for f in fields if f not in ("name", "version")})
+    if unknown or any(spec or conv for _, f, spec, conv in parsed if f is not None):
+        raise ConfigError(
+            f"{where}: {template!r} may only use the plain fields {{name}} and {{version}}"
+            + (f" (found {unknown})" if unknown else "")
+        )
+    if "version" not in fields:
+        raise ConfigError(f"{where}: {template!r} must contain {{version}}")
+    if need_name and "name" not in fields:
+        raise ConfigError(
+            f"{where}: {template!r} must contain {{name}} so a component's tags cannot collide "
+            "with the root's or another component's"
+        )
+
+
 def _check_subprojects(cfg: Config) -> None:
     rows = cfg.get("subprojects")
     names: list[str] = []
@@ -410,6 +451,13 @@ def _check_subprojects(cfg: Config) -> None:
         if row["name"] in names:
             raise ConfigError(f"subprojects[{i}].name: duplicate subproject {row['name']!r}")
         names.append(row["name"])
+        _check_tag(f"subprojects[{i}].tag", row["tag"], need_name=row["release"])
+        bases = [Path(a.rstrip("/")).name for a in row["apidoc"]]
+        if len(set(bases)) != len(bases):
+            raise ConfigError(
+                f"subprojects[{i}].apidoc: {row['name']!r} lists two packages with the same "
+                "directory name, which would share one api directory"
+            )
     for i, row in enumerate(rows):
         for need in row["needs"]:
             if need not in names:
@@ -481,6 +529,7 @@ def export(cfg: Config) -> dict[str, Any]:
     ``matrix.include`` legs have their runner resolved against the shipped python build snapshot
     (see :mod:`ghtools.runners`); legs no runner can run are omitted.
     """
+    from .components import released  # local import: components imports config
     from .runners import resolve_matrix  # local import: runners imports config
 
     python, runners = cfg.get("ci.python"), cfg.get("ci.runners")
@@ -499,6 +548,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
         "status": {"enabled": cfg.get("status.enabled")},
         "subprojects": bool(in_tree(cfg)),
+        "components": bool(released(cfg)),
         "release": {
             "enabled": cfg.get("release.enabled"),
             "commit": cfg.get("release.commit"),

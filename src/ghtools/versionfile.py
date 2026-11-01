@@ -46,6 +46,15 @@ def set_pyproject_version(text: str, version: str) -> str:
     )
 
 
+def set_manifest_version(raw: str, version: str) -> str:
+    """Return the JSON manifest text `raw` with its top-level ``version`` set, keeping its indent
+    and line endings. Raises ``json.JSONDecodeError`` when `raw` is not JSON."""
+    data = json.loads(raw)
+    data["version"] = version
+    new = json.dumps(data, indent=_json_indent(raw), ensure_ascii=False) + "\n"
+    return new.replace("\n", "\r\n") if "\r\n" in raw else new
+
+
 def read_version(cfg: Config, root: Path) -> str | None:
     source = cfg.get("version.source")
     if source == "tag":
@@ -72,10 +81,6 @@ def write_version(cfg: Config, root: Path, version: str) -> str:
     if source == "pyproject":
         new = set_pyproject_version(raw, version)
     else:
-        data = json.loads(raw)
-        data["version"] = version
-        new = json.dumps(data, indent=_json_indent(raw), ensure_ascii=False) + "\n"
-        if "\r\n" in raw:
-            new = new.replace("\n", "\r\n")
+        new = set_manifest_version(raw, version)
     path.write_bytes(new.encode("utf-8"))
     return rel

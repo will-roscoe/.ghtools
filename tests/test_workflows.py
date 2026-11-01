@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ghtools import scaffold
+from ghtools import config, scaffold
 from ghtools.gates import BUILTIN
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -514,3 +514,144 @@ def test_export_flags_rules_only_when_set():
     assert config.export(config.from_dict({}))["select"] is False
     cfg = config.from_dict({"ci": {"select": [{"marker": "tui", "changed": ["src/**"]}]}})
     assert config.export(cfg)["select"] is True
+
+
+def test_release_components_job_skipped_without_components():
+    jobs = _jobs()
+    job = jobs["release-components"]
+    assert "needs.config.outputs.components != '[]'" in job["if"]
+    assert "always()" in job["if"] and "needs.config.outputs.default-ref == 'true'" in job["if"]
+    assert set(jobs["release"]["needs"]) <= set(job["needs"])
+    config_job = jobs["config"]
+    assert config_job["outputs"]["components"].endswith("|| '[]' }}")
+    step = next(s for s in config_job["steps"] if s.get("id") == "components")
+    assert "fromJSON(steps.export.outputs.config).components" in step["if"]
+    # Without components the export flag is false, so the step is skipped and the output is '[]'.
+    assert config.export(config.from_dict({}))["components"] is False
+    cfg = config.from_dict({"subprojects": [{"name": "a", "path": "a", "release": True}]})
+    assert config.export(cfg)["components"] is True
+    # status still runs whatever a skipped needs entry says, and reads no needs result
+    status = jobs["status"]
+    assert "release-components" in status["needs"]
+    assert "always()" in status["if"] and "needs.*" not in status["if"]
+    for s in status["steps"]:
+        assert "needs.*.result" not in str(s)
+
+
+def test_release_components_values_reach_shell_through_env_only():
+    job = _jobs()["release-components"]
+    for step in job["steps"]:
+        assert "${{" not in step.get("run", ""), step.get("name")
+    gh = next(s for s in job["steps"] if s.get("name") == "GitHub releases")
+    assert '"Release $tag"' in str(
+        _step("release-components", "Prepare the release commit and tags locally")["run"]
+    )
+    assert '--title "$name $version"' in gh["run"] and "--verify-tag" in gh["run"]
+    assert "ghtools release components decide" in _step("release-components", "Decide")["run"]
+
+
+def test_race_handling_present():
+    job = _jobs()["release-components"]
+    assert "release" in job["needs"]  # the root release lands first; never two pushes at once
+    push = _step("release-components", "Push release commit and tags")["run"]
+    assert "git fetch --quiet origin" in push and "FETCH_HEAD" in push
+    assert 'echo "pushed=false"' in push and "moved since this run started" in push
+    assert "git push --atomic" in push
+    publish = next(s for s in job["steps"] if s.get("name") == "GitHub releases")
+    assert "steps.push.outputs.pushed == 'true'" in publish["if"]
+    prep = _step("release-components", "Prepare the release commit and tags locally")["run"]
+    assert "select(.resume | not)" in prep  # resumed rows are not re-tagged or re-committed
+
+
+def test_component_job_fast_forwards_only_onto_the_root_release_commit():
+    step = _step("release-components", "Continue from the root release commit")
+    assert step["env"] == {"ROOT_TAG": "${{ needs.release.outputs.tag }}"}
+    assert '"chore(release): $ROOT_TAG [skip ci]"' in step["run"]
+    assert "FETCH_HEAD^" in step["run"] and "$GITHUB_SHA" in step["run"]
+    # the subject must be what the root release job commits
+    assert (
+        'git commit -m "chore(release): $TAG [skip ci]"'
+        in _step("release", "Prepare the release commit and tag locally")["run"]
+    )
+
+
+def test_component_job_publishes_only_what_it_decided():
+    prep = _step("release-components", "Prepare the release commit and tags locally")
+    assert 'prepare --decisions "$COMPONENTS"' in prep["run"]
+    assert "GH_TOKEN" in prep["env"]
+    push = _step("release-components", "Push release commit and tags")["run"]
+    assert 'git push --atomic origin "${refs[@]}" "${tags[@]}"' in push
+    assert "git push origin" not in push
+    loop = _step("release-components", "GitHub releases")["run"]
+    assert loop.count("</dev/null") == 2
+
+
+def _config_step(step_id):
+    return next(s for s in _pipeline()["jobs"]["config"]["steps"] if s.get("id") == step_id)
+
+
+def _run_step(tmp_path, step_id, env, fake_ghtools):
+    """Run a config-job step's script with a stub `ghtools`; return (output file text, stub log)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    stub = bindir / "ghtools"
+    stub.write_text(f'#!/bin/bash\necho "$@" >> "{tmp_path}/calls"\n{fake_ghtools}\n')
+    stub.chmod(0o755)
+    out = tmp_path / "out"
+    out.write_text("")
+    script = tmp_path / f"{step_id}.sh"
+    script.write_text(_config_step(step_id)["run"])
+    full = {"PATH": f"{bindir}:/usr/bin:/bin", "GITHUB_OUTPUT": str(out), **env}
+    subprocess.run(["bash", "-e", str(script)], env=full, check=True, cwd=tmp_path)
+    calls = tmp_path / "calls"
+    return out.read_text(), calls.read_text() if calls.exists() else ""
+
+
+def test_a_component_release_forces_ci_over_every_subproject():
+    ids = [s.get("id") for s in _pipeline()["jobs"]["config"]["steps"]]
+    # The decisions are known before anything that reads them.
+    for reader in ("select", "paths", "matrix"):
+        assert ids.index("components") < ids.index(reader)
+        assert ids.index("decide") < ids.index(reader)
+    assert ids.index("directives") < ids.index("select")
+
+
+@pytest.mark.parametrize("components", ["", "[]"])
+def test_no_due_component_leaves_the_run_decision_alone(tmp_path, components):
+    env = {"EVENT": "push", "BEFORE": "abc", "COMPONENTS": components}
+    out, calls = _run_step(tmp_path, "paths", env, 'echo "false"')
+    assert "run-ci=false" in out and "should-run" in calls
+
+
+def test_a_due_component_runs_ci_like_a_releasing_root(tmp_path):
+    env = {"EVENT": "push", "BEFORE": "abc", "COMPONENTS": '[{"name":"a"}]'}
+    out, calls = _run_step(tmp_path, "paths", env, 'echo "false"')
+    assert "run-ci=true" in out and "should-run" not in calls
+
+
+def test_matrix_covers_every_subproject_when_a_component_is_due(tmp_path):
+    base = {"BASE": "a", "HEAD": "b", "FORCE_CI": ""}
+    _, calls = _run_step(tmp_path, "matrix", {**base, "COMPONENTS": "[]"}, "true")
+    assert "--all" not in calls
+    (tmp_path / "calls").unlink()
+    _, calls = _run_step(tmp_path, "matrix", {**base, "COMPONENTS": '[{"name":"a"}]'}, "true")
+    assert "--all" in calls
+
+
+@pytest.mark.parametrize(
+    ("extra", "full"),
+    [
+        ({}, False),
+        ({"FORCE_CI": "true"}, True),
+        ({"WOULD_RELEASE": "true"}, True),
+        ({"COMPONENTS": '[{"name":"a"}]'}, True),
+        ({"COMPONENTS": "[]"}, False),
+    ],
+)
+def test_selection_never_deselects_on_a_forced_or_releasing_run(tmp_path, extra, full):
+    env = {"EVENT": "push", "BASE": "abc", **extra}
+    out, calls = _run_step(tmp_path, "select", env, "echo '[\"tui\"]'")
+    if full:
+        assert "deselect=[]" in out and "ci select" not in calls
+    else:
+        assert 'deselect=["tui"]' in out

@@ -38,6 +38,17 @@ def setup_commands(cfg: Config, subproject: str | None) -> list[str]:
 
 
 def install_command(cfg: Config, subproject: str | None = None) -> list[str]:
+    """The pip command ``ghtools ci install`` runs, as an argv list.
+
+    For a subproject, its needed siblings install first (each from ``install``, else
+    ``-e ./<path>``), then pytest and pytest-cov. A row with ``test-command`` set and an empty
+    ``install`` contributes nothing, since its command brings its own environment.
+
+    :param cfg: the loaded config.
+    :param subproject: a ``[[subprojects]]`` name, or None for the root's ``ci.install``.
+    :returns: the argv, or ``[]`` when nothing is to be installed (callers must skip the run).
+    :raises GhtoolsError: if `subproject` is not a configured subproject.
+    """
     if subproject:
         # Needed siblings install from their ./path (not PyPI), dependencies first; the test
         # runner is always added since a subproject's extras may not include it.
@@ -51,7 +62,13 @@ def install_command(cfg: Config, subproject: str | None = None) -> list[str]:
                 order.append(row)
 
         visit(subproject)
-        entries = [e for row in order for e in (row["install"] or [f"-e ./{row['path']}"])]
+        entries = [
+            e
+            for row in order
+            for e in (row["install"] or ([] if row["test-command"] else [f"-e ./{row['path']}"]))
+        ]
+        if not entries:
+            return []
         words = [w for e in entries for w in shlex.split(e)]
         return [python(), "-m", "pip", "install", *words, "pytest", "pytest-cov"]
     return [python(), "-m", "pip", "install", *shlex.split(cfg.get("ci.install"))]
@@ -87,10 +104,15 @@ def test_command(cfg: Config, subproject: str | None = None, deselect: Sequence[
     become one final ``-m 'not a and not b'`` word appended to ``ci.test`` as written, and-joined
     with the effective ``-m`` already in it (the last one, as pytest reads it). Empty `deselect`
     gives the command unchanged. A root ``ci.test`` that is not pytest is returned as is.
+
+    A subproject with ``test-command`` set gets that command verbatim, even when `deselect` is
+    non-empty: it may not be pytest, so markers do not apply and more tests run, never fewer.
     """
     if subproject:
         # Run from the repo root so coverage paths stay repo-relative across legs.
         row = _subproject(cfg, subproject)
+        if row["test-command"]:
+            return row["test-command"]
         parts = ["python", "-m", "pytest", row["tests"] or row["path"]]
         if row["package"]:
             parts += [f"--cov={row['package']}", "--cov-report=xml:coverage.xml"]
@@ -161,11 +183,26 @@ def code_changed(cfg: Config, root: Path, base: str | None) -> bool:
 
 def docs_changed(cfg: Config, root: Path, base: str | None) -> bool:
     """Should the docs job run? With docs.paths empty always; otherwise only if the change since
-    `base` touches one of those globs (or ghtools's own settings or stub). Unknown base: True."""
+    `base` touches one of those globs (or ghtools's own settings or stub). Unknown base: True.
+
+    With released components, a change under a component's ``path``, ``docs-paths`` or a needed
+    subproject's path also counts; without them the result is as above.
+    """
     patterns = [glob_to_regex(p) for p in cfg.get("docs.paths")]
     if not patterns:
         return True
     files = changed_files(base or "", root)
     if files is None:
         return True
-    return any(f in _ALWAYS or any(p.match(f) for p in patterns) for f in files)
+    from .components import released  # local import: components imports config
+
+    prefixes: list[str] = []
+    for c in released(cfg):
+        patterns += [glob_to_regex(p) for p in c.docs_paths]
+        prefixes += [p.strip("/") for p in (c.path, *c.needs_paths)]
+    return any(
+        f in _ALWAYS
+        or any(p.match(f) for p in patterns)
+        or any(x in ("", ".") or f.startswith(x + "/") for x in prefixes)
+        for f in files
+    )

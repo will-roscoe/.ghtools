@@ -36,6 +36,8 @@ jobs:
       config: ${{ steps.export.outputs.config }}
       default-ref: ${{ steps.ref.outputs.default-ref }}
       would-release: ${{ steps.decide.outputs.released || 'false' }}
+      # JSON rows of the released components due a release; '[]' (also without components).
+      components: ${{ steps.components.outputs.components || '[]' }}
       run-ci: ${{ steps.reuse.outputs.reused == 'true' && 'false' || steps.paths.outputs.run-ci }}
       code-changed: ${{ steps.code.outputs.code-changed }}
       run-docs: ${{ steps.docs-paths.outputs.run-docs }}
@@ -75,6 +77,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ghtools release decide --github-output
+      - name: Would a component release?
+        id: components
+        if: steps.ref.outputs.default-ref == 'true' && fromJSON(steps.export.outputs.config).components
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ghtools release components decide --github-output
       - name: Commit directives
         id: directives
         if: github.event_name == 'push'
@@ -89,7 +97,15 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          FORCE_CI: ${{ steps.directives.outputs.force-ci }}
+          WOULD_RELEASE: ${{ steps.decide.outputs.released }}
+          COMPONENTS: ${{ steps.components.outputs.components }}
         run: |
+          # A forced run, or one that could release the root or a component, tests everything.
+          if [ "$FORCE_CI" = "true" ] || [ "$WOULD_RELEASE" = "true" ] || { [ -n "$COMPONENTS" ] && [ "$COMPONENTS" != "[]" ]; }; then
+            echo "deselect=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT" = "push" ] && { [ -z "$BASE" ] || [ -z "${BASE//0/}" ]; }; then
             BASE="$(git rev-parse --verify -q 'HEAD^1' || true)"
           fi
@@ -102,6 +118,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
           WOULD_RELEASE: ${{ steps.decide.outputs.released }}
           FORCE_CI: ${{ steps.directives.outputs.force-ci }}
+          COMPONENTS: ${{ steps.components.outputs.components }}
           HEAD_REF: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           DESELECT: ${{ steps.select.outputs.deselect }}
@@ -110,7 +127,7 @@ jobs:
           if [ -n "$DESELECT" ]; then skip_args+=(--deselect "$DESELECT"); fi
           if [ "$EVENT" = "pull_request" ] && [ "$(ghtools ci skip-pr --head "$HEAD_REF" --sha "$HEAD_SHA" "${skip_args[@]}")" = "true" ]; then
             echo "run-ci=false" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ] || [ "$FORCE_CI" = "true" ]; then
+          elif [ "$EVENT" != "push" ] || [ "$WOULD_RELEASE" = "true" ] || [ "$FORCE_CI" = "true" ] || { [ -n "$COMPONENTS" ] && [ "$COMPONENTS" != "[]" ]; }; then
             echo "run-ci=true" >> "$GITHUB_OUTPUT"
           else
             run_ci="$(ghtools ci should-run --base "$BEFORE")"
@@ -133,9 +150,10 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           FORCE_CI: ${{ steps.directives.outputs.force-ci }}
+          COMPONENTS: ${{ steps.components.outputs.components }}
         run: |
           args=(--base "$BASE" --head "$HEAD" --github-output)
-          if [ "$FORCE_CI" = "true" ]; then args+=(--all); fi
+          if [ "$FORCE_CI" = "true" ] || { [ -n "$COMPONENTS" ] && [ "$COMPONENTS" != "[]" ]; }; then args+=(--all); fi
           ghtools ci matrix "${args[@]}"
       - name: Did a pull request already test this tree?
         # ci.reuse-pr-results: a push to the default branch whose tree a passing pull request run
@@ -693,9 +711,136 @@ jobs:
           gh release create "${args[@]}" "${files[@]}"
           echo "released=true" >> "$GITHUB_OUTPUT"
 
+  # Released components (subprojects with release = true): one commit, one annotated tag and one
+  # GitHub release each. It needs `release` so the two never push at once: the root release (if
+  # any) lands first and this job continues from the branch it pushed. Skipped without components.
+  release-components:
+    needs: [config, test, tests-passed, docker, hacs-test, hassfest, hacs, lint, release]
+    if: >-
+      always() && needs.config.result == 'success' &&
+      needs.config.outputs.default-ref == 'true' &&
+      needs.config.outputs.components != '[]' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-ghtools
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Continue from the root release commit
+        # The root release pushed its commit to the branch after this run started; build on it
+        # rather than on GITHUB_SHA so this job's push is a fast-forward.
+        if: needs.release.outputs.released == 'true' && !inputs.dry-run
+        env:
+          ROOT_TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          branch="$(ghtools config get branch)"
+          git fetch --quiet origin "$branch"
+          # Only the root release commit itself: a child of the tested commit whose subject is
+          # exactly what the `release` job commits. A user commit pushed since (the root made no
+          # commit, e.g. on a resume) never matches. Otherwise stay put: the push below is then
+          # rejected and reported as "moved", as for `release`.
+          if [ "$(git rev-parse --verify -q 'FETCH_HEAD^' || true)" = "$GITHUB_SHA" ] &&
+            [ "$(git log -1 --format=%s FETCH_HEAD)" = "chore(release): $ROOT_TAG [skip ci]" ]; then
+            git merge --ff-only FETCH_HEAD
+          fi
+      - name: Decide
+        id: decide
+        env:
+          # Lets `decide` resume a ghtools tag that an earlier run pushed but never released.
+          GH_TOKEN: ${{ github.token }}
+        run: ghtools release components decide --github-output
+      - name: Dry-run summary
+        if: inputs.dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ghtools release components decide >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare the release commit and tags locally
+        id: prepare
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENTS: ${{ steps.decide.outputs.components }}
+          MESSAGE: ${{ steps.decide.outputs.commit-message }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # prepare writes exactly the rows decide exported (it decides nothing again), and never
+          # a resume row.
+          changed_out="$(ghtools release components prepare --decisions "$COMPONENTS")"
+          if [ -n "$changed_out" ]; then
+            mapfile -t changed <<<"$changed_out"
+            git add -- "${changed[@]}"
+            git commit -m "$MESSAGE"
+          fi
+          while IFS= read -r tag; do
+            git tag -a "$tag" -m "Release $tag"
+          done < <(jq -r '.[] | select(.resume | not) | .tag' <<<"$COMPONENTS")
+      - name: Push release commit and tags
+        id: push
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run
+        env:
+          COMPONENTS: ${{ steps.decide.outputs.components }}
+          BASE: ${{ steps.prepare.outputs.base }}
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(jq -r '.[] | select(.resume | not) | "refs/tags/" + .tag' <<<"$COMPONENTS")
+          if [ "${#tags[@]}" -eq 0 ]; then
+            # Only resumed releases: their tags are already pushed.
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          branch="$(ghtools config get branch)"
+          # One atomic push: the release commit and its tags land together or not at all.
+          refs=()
+          if [ "$(git rev-parse HEAD)" != "$BASE" ]; then refs+=("HEAD:$branch"); fi
+          if ! git push --atomic origin "${refs[@]}" "${tags[@]}"; then
+            if [ "${#refs[@]}" -gt 0 ]; then
+              git fetch --quiet origin "$branch"
+              if [ "$(git rev-parse FETCH_HEAD)" != "$BASE" ]; then
+                # No rebase: commits pushed after this run started haven't passed this run's CI.
+                # The queued run for the newer push releases everything together.
+                echo "::notice::$branch moved since this run started, so no components were released here; the next run releases these commits together."
+                echo "pushed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "::error::Pushing the release commit to $branch was rejected. If a ruleset protects $branch, add GitHub Actions to its bypass list or set release.commit = false in .github/ghtools.toml."
+            fi
+            exit 1
+          fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - name: GitHub releases
+        if: steps.decide.outputs.released == 'true' && !inputs.dry-run && steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENTS: ${{ steps.decide.outputs.components }}
+        run: |
+          set -euo pipefail
+          # One row per line: name, version and tag from the exported decision, never re-derived.
+          while IFS=$'\t' read -r name version tag; do
+            ghtools release components notes "$name" "$version" > "$RUNNER_TEMP/notes.md" </dev/null
+            args=("$tag" --title "$name $version" --verify-tag)
+            if [ -s "$RUNNER_TEMP/notes.md" ]; then
+              args+=(--notes-file "$RUNNER_TEMP/notes.md")
+            else
+              args+=(--generate-notes)
+            fi
+            case "$version" in *-*) args+=(--prerelease) ;; esac
+            gh release create "${args[@]}" </dev/null
+          done < <(jq -r '.[] | [.name, .version, .tag] | @tsv' <<<"$COMPONENTS")
+
   # ---- Status card and badges, published to the status branch ----
   status:
-    needs: [config, test, tests-passed, docker, hacs-test, hassfest, hacs, lint, docs, docs-deploy, release]
+    needs: [config, test, tests-passed, docker, hacs-test, hassfest, hacs, lint, docs, docs-deploy, release, release-components]
     if: >-
       always() && needs.config.result == 'success' &&
       needs.config.outputs.default-ref == 'true' &&
