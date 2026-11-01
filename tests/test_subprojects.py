@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ghtools import config, subprojects
 from ghtools.cli import main
+from ghtools.errors import ConfigError
 
 CFG = config.from_dict(
     {
@@ -212,3 +215,32 @@ def test_forced_matrix_selects_every_subproject(git_repo):
     cfg = config.load(git_repo.path)
     m, any_legs = subprojects.matrix(cfg, git_repo.path, base, "HEAD", force=True)
     assert any_legs and [leg["subproject"] for leg in m["include"]] == ["a"]
+
+
+def _three(git_repo):
+    """A repo with in-tree a, b and c, and the commit before an unrelated docs change."""
+    git_repo.commit("feat: a", {"a/x.py": "1", "b/x.py": "1", "c/x.py": "1"})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("docs: readme", {"README.md": "x"})
+    rows = [{"name": n, "path": n, "kind": "in-tree"} for n in ("a", "b", "c")]
+    return config.from_dict({"subprojects": rows, "profile": "umbrella"}), base
+
+
+def test_matrix_also_adds_only_the_named_subprojects(git_repo):
+    cfg, base = _three(git_repo)
+    m, any_legs = subprojects.matrix(cfg, git_repo.path, base, "HEAD", also=["b"])
+    assert any_legs and [leg["subproject"] for leg in m["include"]] == ["b"]
+
+
+def test_matrix_also_keeps_what_the_push_touched(git_repo):
+    cfg, _ = _three(git_repo)
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("fix: c", {"c/x.py": "2"})
+    m, _ = subprojects.matrix(cfg, git_repo.path, base, "HEAD", also=["a"])
+    assert [leg["subproject"] for leg in m["include"]] == ["a", "c"]
+
+
+def test_matrix_also_rejects_an_unknown_name(git_repo):
+    cfg, base = _three(git_repo)
+    with pytest.raises(ConfigError, match="zzz"):
+        subprojects.matrix(cfg, git_repo.path, base, "HEAD", also=["zzz"])

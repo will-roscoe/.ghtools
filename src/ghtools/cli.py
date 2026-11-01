@@ -626,7 +626,7 @@ def _cmd_ci_matrix(args: Any) -> int:
     root = repo_dir(args)
     notes: list[Any] = []
     m, any_legs = matrix(
-        _config.load(root), root, args.base, args.head, force=args.all, notes=notes
+        _config.load(root), root, args.base, args.head, force=args.all, notes=notes, also=args.also
     )
     _print_runner_notes(notes)
     if args.github_output:
@@ -727,6 +727,13 @@ def _ci_commands(sub: Any) -> None:
     m.add_argument("--head", default="HEAD")
     m.add_argument("--github-output", action="store_true")
     m.add_argument("--all", action="store_true", help="every subproject (a [ci] directive)")
+    m.add_argument(
+        "--also",
+        nargs="*",
+        default=[],
+        metavar="NAME",
+        help="subprojects tested whatever the diff says (components due for release)",
+    )
     m.set_defaults(handler=_cmd_ci_matrix)
 
 

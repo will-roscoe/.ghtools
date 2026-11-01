@@ -180,7 +180,7 @@ The `release-components` job commits every component's version and changelog in 
 pushes it with all the new tags in one atomic push. A component whose version file is ahead of its
 tags is not released until you tag that version. A component with no tag at all releases on the next
 push unless its version file is ahead, so backfill lightweight tags before setting `release = true`.
-A due component release runs CI over every subproject first. `tag` must contain `{name}`. `ghtools release components decide` prints
+A due component release runs CI over that component, plus whatever the push touched, first. `tag` must contain `{name}`. `ghtools release components decide` prints
 each decision and its reason. Details and pitfalls are in [AGENTS.md](AGENTS.md).
 
 ## Commit directives
