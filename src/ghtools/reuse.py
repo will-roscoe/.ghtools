@@ -11,6 +11,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -48,8 +52,16 @@ def _git_in(root: Path, *args: str, stdin: str | None = None) -> str:
     return proc.stdout
 
 
-def record(root: Path, legs_dir: Path, remote: str = "origin") -> str:
-    """Push the record for HEAD's tree and return its ref. Legs: every `*.json` under `legs_dir`."""
+def record(
+    root: Path, legs_dir: Path, remote: str = "origin", meta: dict[str, Any] | None = None
+) -> str:
+    """Push the record for HEAD's tree and return its ref. Legs: every `*.json` under `legs_dir`.
+
+    `meta` says what the run covered: `{"source": "ci" | "local", "deselected": [markers]}`
+    (`source` defaults to "ci", `deselected` to none). It is stored as `meta.json` beside `legs/`
+    with the ghtools version and an ISO timestamp added. `None` writes a "ci", nothing-deselected
+    record.
+    """
     root = Path(root)
     tree = tree_sha(root)
     entries = []
@@ -59,15 +71,52 @@ def record(root: Path, legs_dir: Path, remote: str = "origin") -> str:
         name = path.name if path.parent == Path(legs_dir) else f"{path.parent.name}.json"
         entries.append(f"100644 blob {blob}\t{name}")
     legs = _git_in(root, "mktree", stdin="\n".join(entries) + ("\n" if entries else "")).strip()
-    top = _git_in(root, "mktree", stdin=f"040000 tree {legs}\tlegs\n").strip()
+    top_entries = f"040000 tree {legs}\tlegs\n"
+    try:
+        ghtools_version = _pkg_version("ghtools")
+    except PackageNotFoundError:
+        ghtools_version = "unknown"
+    body = {
+        "source": "ci",
+        "deselected": [],
+        **(meta or {}),
+        "ghtools": ghtools_version,
+        "at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    meta_blob = _git_in(root, "hash-object", "-w", "--stdin", stdin=json.dumps(body)).strip()
+    top = _git_in(
+        root, "mktree", stdin=f"100644 blob {meta_blob}\tmeta.json\n{top_entries}"
+    ).strip()
     commit = _git_in(root, "commit-tree", top, "-m", f"tested {tree}").strip()
     ref = ref_for(tree)
     _git_in(root, "push", "--quiet", "--force", remote, f"{commit}:{ref}")
     return ref
 
 
-def _covers(legs: list[dict[str, Any]], matrix: dict[str, Any]) -> bool:
-    """Is every leg `matrix` would run recorded as passing (python, runner, subproject)?"""
+def covers_selection(meta: dict[str, Any] | None, want: Sequence[str], has_rules: bool) -> bool:
+    """Did the recorded run leave out nothing beyond the markers `want` leaves out?
+
+    `meta` is the record's `meta.json` (None for a record written before metadata existed, which
+    is covering only where the repo has no `ci.select` rules, `has_rules` False).
+    """
+    if meta is None:
+        return not has_rules
+    return set(meta.get("deselected") or []) <= set(want)
+
+
+def _covers(legs: list[dict[str, Any]], matrix: dict[str, Any], local: bool = False) -> bool:
+    """Is every leg `matrix` would run recorded as passing (python, runner, subproject)?
+
+    With `local`, only the subproject is compared: a local run has no CI python and runner.
+    """
+    if local:
+        have_sub = {
+            lg.get("subproject") or ""
+            for lg in legs
+            if not lg.get("lint_only") and lg.get("status") == "passing"
+        }
+        want_sub = {row.get("subproject") or "" for row in matrix.get("include", [])}
+        return want_sub <= have_sub
     have = {
         (lg.get("python"), lg.get("runner"), lg.get("subproject") or "")
         for lg in legs
@@ -80,13 +129,58 @@ def _covers(legs: list[dict[str, Any]], matrix: dict[str, Any]) -> bool:
     return want <= have
 
 
-def lookup(root: Path, out_dir: Path, matrix: dict[str, Any], remote: str = "origin") -> bool:
+_UNREADABLE = object()
+
+
+def _read_meta(root: Path) -> dict[str, Any] | None | object:
+    """The `meta.json` of the record just fetched (FETCH_HEAD): its dict, None for a record
+    without one, or `_UNREADABLE` when it is present but not a JSON object."""
+    if "meta.json" not in _git_in(root, "ls-tree", "--name-only", "FETCH_HEAD").split():
+        return None
+    try:
+        meta = json.loads(_git_in(root, "show", "FETCH_HEAD:meta.json"))
+    except json.JSONDecodeError:
+        return _UNREADABLE
+    return meta if isinstance(meta, dict) else _UNREADABLE
+
+
+def _usable(
+    root: Path, want: Sequence[str], has_rules: bool, accept_local: bool
+) -> tuple[bool, bool]:
+    """Is the fetched record's selection acceptable? Returns (usable, local source)."""
+    meta = _read_meta(root)
+    if meta is _UNREADABLE:
+        return False, False
+    local = isinstance(meta, dict) and meta.get("source") == "local"
+    if local and not accept_local:
+        return False, local
+    return covers_selection(meta, want, has_rules), local  # type: ignore[arg-type]
+
+
+def lookup(
+    root: Path,
+    out_dir: Path,
+    matrix: dict[str, Any],
+    remote: str = "origin",
+    want: Sequence[str] = (),
+    has_rules: bool = False,
+    accept_local: bool = False,
+) -> bool:
     """Is HEAD's tree recorded as tested, by passing legs covering `matrix`? If so, write the
-    recorded legs to `out_dir` (for the status card) and return True. Any doubt returns False."""
+    recorded legs to `out_dir` (for the status card) and return True. Any doubt returns False.
+
+    The record must also cover the selection (:func:`covers_selection` with `want`, the markers
+    this run would leave out, and `has_rules`: whether the repo has `ci.select` rules). A
+    `source: "local"` record is refused unless `accept_local`; an accepted one covers the matrix
+    by subproject only.
+    """
     root = Path(root)
     tree = tree_sha(root)
     try:
         _git_in(root, "fetch", "--quiet", "--no-tags", "--depth=1", remote, ref_for(tree))
+        ok, local = _usable(root, want, has_rules, accept_local)
+        if not ok:
+            return False
         listing = _git_in(root, "ls-tree", "--name-only", "FETCH_HEAD:legs").split()
         legs = {
             name: json.loads(_git_in(root, "show", f"FETCH_HEAD:legs/{name}"))
@@ -95,7 +189,7 @@ def lookup(root: Path, out_dir: Path, matrix: dict[str, Any], remote: str = "ori
         }
     except (PreconditionError, json.JSONDecodeError):
         return False
-    if not legs or not _covers(list(legs.values()), matrix):
+    if not legs or not _covers(list(legs.values()), matrix, local=local):
         return False
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -104,15 +198,23 @@ def lookup(root: Path, out_dir: Path, matrix: dict[str, Any], remote: str = "ori
     return True
 
 
-def is_tested(root: Path, rev: str, remote: str = "origin") -> bool:
-    """Is the tree of `rev` recorded under refs/ghtools/tested/? Any doubt (unknown rev, no
-    remote, fetch failure) returns False."""
+def is_tested(
+    root: Path,
+    rev: str,
+    remote: str = "origin",
+    want: Sequence[str] = (),
+    has_rules: bool = False,
+    accept_local: bool = False,
+) -> bool:
+    """Is the tree of `rev` recorded under refs/ghtools/tested/, by a record covering the
+    selection (see :func:`lookup`)? Any doubt (unknown rev, no remote, fetch failure) returns
+    False."""
     try:
         tree = tree_sha(Path(root), rev)
         _git_in(root, "fetch", "--quiet", "--no-tags", "--depth=1", remote, ref_for(tree))
+        return _usable(Path(root), want, has_rules, accept_local)[0]
     except (PreconditionError, subprocess.SubprocessError, OSError):
         return False
-    return True
 
 
 def drop(root: Path, remote: str = "origin") -> None:

@@ -66,6 +66,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
         # passed on a same-repo pull request (recorded under refs/ghtools/tested/); the recorded
         # results still feed the status card.
         "reuse-pr-results": Field(bool, False),
+        # Accept tested records written by a local run (meta source "local"); their legs carry no
+        # CI python or runner, so only subprojects are compared. Off: only CI records are reused.
+        "accept-local-tested": Field(bool, False),
         # Events (push, pull_request, ...) that always run the full selection, ignoring ci.select.
         "select-full-on": Field(list, []),
         "gates": Field(list, ["ruff", "ruff-format"]),

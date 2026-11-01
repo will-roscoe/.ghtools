@@ -289,6 +289,24 @@ def _cmd_ci_select(args: Any) -> int:
     return 0
 
 
+def _reuse_selection(root: Path, deselect: str) -> dict[str, Any]:
+    """Keyword arguments for reuse.lookup/is_tested: the markers this run leaves out
+    (`--deselect` JSON), whether the repo has ci.select rules, and ci.accept-local-tested.
+    Without a readable config only `want` is set."""
+    from .errors import ConfigError
+
+    want = json.loads(deselect) if deselect else []
+    try:
+        cfg = _config.load(root)
+    except ConfigError:  # reuse never needed a config; without one, behave as before
+        return {"want": want}
+    return {
+        "want": want,
+        "has_rules": bool(cfg.get("ci.select")),
+        "accept_local": cfg.get("ci.accept-local-tested"),
+    }
+
+
 def _cmd_ci_skip_pr(args: Any) -> int:
     import sys
 
@@ -302,7 +320,7 @@ def _cmd_ci_skip_pr(args: Any) -> int:
     # after the other leave a tree that was never tested together.
     if not args.sha:
         print(f"ghtools: not skipping '{args.head}': no head sha to look up", file=sys.stderr)
-    elif not reuse.is_tested(root, args.sha):
+    elif not reuse.is_tested(root, args.sha, **_reuse_selection(root, args.deselect)):
         print(
             f"ghtools: not skipping '{args.head}': no {reuse.REF_PREFIX}<tree> ref for the tree "
             f"of {args.sha[:12]}, running tests",
@@ -326,7 +344,11 @@ def _cmd_ci_docs_changed(args: Any) -> int:
 def _cmd_ci_record_tested(args: Any) -> int:
     from . import reuse
 
-    print(reuse.record(repo_dir(args), Path(args.legs)))
+    meta = {
+        "source": args.source,
+        "deselected": json.loads(args.deselect) if args.deselect else [],
+    }
+    print(reuse.record(repo_dir(args), Path(args.legs), meta=meta))
     return 0
 
 
@@ -335,7 +357,7 @@ def _cmd_ci_reuse(args: Any) -> int:
 
     root = repo_dir(args)
     matrix = json.loads(args.matrix)
-    if reuse.lookup(root, Path(args.out), matrix):
+    if reuse.lookup(root, Path(args.out), matrix, **_reuse_selection(root, args.deselect)):
         print("true")
     else:
         print("false")
@@ -452,6 +474,9 @@ def _ci_commands(sub: Any) -> None:
     )
     sp.add_argument("--head", default="")
     sp.add_argument("--sha", default="", help="the head branch's commit; its tree must be tested")
+    sp.add_argument(
+        "--deselect", default="", help="JSON list of pytest markers this run leaves out (ci select)"
+    )
     sp.set_defaults(handler=_cmd_ci_skip_pr)
     dc = cs.add_parser(
         "docs-changed", help="should the docs job run for the change since BASE? (true/false)"
@@ -462,12 +487,17 @@ def _ci_commands(sub: Any) -> None:
         "record-tested", help="record HEAD's tree as tested, with the CI legs in --legs"
     )
     rt.add_argument("--legs", required=True)
+    rt.add_argument("--deselect", default="", help="JSON list of pytest markers the run left out")
+    rt.add_argument("--source", choices=["ci", "local"], default="ci", help="who ran the tests")
     rt.set_defaults(handler=_cmd_ci_record_tested)
     ru = cs.add_parser(
         "reuse", help="was HEAD's tree already tested by a pull request? (true/false)"
     )
     ru.add_argument("--matrix", required=True, help="the CI matrix JSON this run would use")
     ru.add_argument("--out", required=True, help="directory to write the recorded legs to")
+    ru.add_argument(
+        "--deselect", default="", help="JSON list of pytest markers this run leaves out (ci select)"
+    )
     ru.set_defaults(handler=_cmd_ci_reuse)
     dt = cs.add_parser("drop-tested", help="delete the record for HEAD's tree")
     dt.set_defaults(handler=_cmd_ci_drop_tested)
