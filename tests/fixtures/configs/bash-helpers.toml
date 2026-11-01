@@ -1,0 +1,40 @@
+# ghtools settings: https://github.com/will-roscoe/.ghtools#configuration
+
+branch = "main"                              # the remote's default branch
+profile = "lint"                             # no Python package, HACS integration or submodules
+
+[release]
+enabled = false                              # no v* tags and no release workflow
+
+[ci]
+gates = []                                   # shellcheck runs in `make lint` with the repo's own severity threshold
+
+[docs]
+enabled = true                               # docs/conf.py
+dir = "docs"                                 # docs/conf.py
+install = "-r docs/requirements.txt"         # pip install in docs workflow
+strict = true                                # warnings fail in the existing Sphinx call
+pages = true                                 # actions/deploy-pages in workflows
+prebuild = ["make docs"]                     # make steps before the Sphinx build
+
+[status]
+enabled = true                               # ghtools publishes the status card to its own branch
+logo = ".github/logo.svg"                      # the card shows the project logo
+
+[[ci.gate]]
+name = "make-lint"
+run = "make lint"
+after = "test"
+
+[[ci.gate]]
+name = "make-validate"
+run = "make validate"
+after = "test"
+
+[[readme.block]]
+name = "status"
+kind = "status"                              # the status card under the title
+
+[[readme.block]]
+name = "overview"
+source = "docs/_shared/overview.rst"         # also included by docs/index.rst (make docs)

@@ -1,0 +1,48 @@
+# ghtools settings: https://github.com/will-roscoe/.ghtools#configuration
+
+branch = "master"                            # the remote's default branch
+profile = "umbrella"                         # .gitmodules with no root package
+
+[release]
+enabled = false                              # no v* tags and no release workflow
+
+[ci]
+gates = []                                   # tool configuration and existing workflows
+
+[status]
+enabled = true                               # ghtools publishes the status card to its own branch
+logo = ".github/logo.svg"                      # the card shows the project logo
+
+[[subprojects]]
+name = "arduino"
+path = "arduino"
+kind = "submodule"
+
+[[subprojects]]
+name = "govee_ble_hass"
+path = "govee-ble-hass"
+kind = "submodule"
+
+[[subprojects]]
+name = "govee_h6056"
+path = "govee-h6056"
+kind = "submodule"
+
+[[subprojects]]
+name = "intercom"
+path = "intercom"
+kind = "submodule"
+
+[[subprojects]]
+name = "ios2ha_camera_hass"
+path = "ios2ha-camera-hass"
+kind = "submodule"
+
+[[subprojects]]
+name = "ios2ha_camera"
+path = "ios2ha-camera"
+kind = "submodule"
+
+[[readme.block]]
+name = "status"
+kind = "status"                              # the status card under the title
