@@ -11,6 +11,7 @@ import copy
 import json
 import re
 import shlex
+import string
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,8 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "zip": Field(str, ""),
         "commit": Field(bool, True),
         "changelog": Field(str, "CHANGELOG.md"),
+        # false: the repo itself no longer releases as v{x}; only released components do.
+        "root": Field(bool, True),
     },
     "ci": {
         "python": Field(list, ["3.12"]),
@@ -159,6 +162,15 @@ TABLE_ARRAYS: dict[str, dict[str, Field]] = {
         "install": Field(list, []),
         "needs": Field(list, []),
         "setup": Field(list, []),
+        # Released components (see ghtools.components); all opt-in.
+        "release": Field(bool, False),
+        "version-file": Field(str, ""),  # "" -> "<path>/pyproject.toml"
+        "changelog": Field(str, ""),  # "" -> "<path>/CHANGELOG.md"
+        "tag": Field(str, "{name}/{version}"),
+        "apidoc": Field(list, []),
+        "docs-paths": Field(list, []),
+        # Runs verbatim instead of pytest; "tests" is a pytest path, not a command.
+        "test-command": Field(str, ""),
     },
 }
 
@@ -391,6 +403,23 @@ def _is_compound(command: str) -> bool:
         return False
 
 
+def _check_tag(where: str, template: str) -> None:
+    """Reject a tag template lacking ``{version}`` or using fields beyond name and version."""
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except ValueError as exc:
+        raise ConfigError(f"{where}: {template!r} is not a valid template ({exc})") from None
+    fields = [f for _, f, _, _ in parsed if f is not None]
+    unknown = sorted({f for f in fields if f not in ("name", "version")})
+    if unknown or any(spec or conv for _, f, spec, conv in parsed if f is not None):
+        raise ConfigError(
+            f"{where}: {template!r} may only use the plain fields {{name}} and {{version}}"
+            + (f" (found {unknown})" if unknown else "")
+        )
+    if "version" not in fields:
+        raise ConfigError(f"{where}: {template!r} must contain {{version}}")
+
+
 def _check_subprojects(cfg: Config) -> None:
     rows = cfg.get("subprojects")
     names: list[str] = []
@@ -410,6 +439,7 @@ def _check_subprojects(cfg: Config) -> None:
         if row["name"] in names:
             raise ConfigError(f"subprojects[{i}].name: duplicate subproject {row['name']!r}")
         names.append(row["name"])
+        _check_tag(f"subprojects[{i}].tag", row["tag"])
     for i, row in enumerate(rows):
         for need in row["needs"]:
             if need not in names:

@@ -254,7 +254,10 @@ def _cmd_ci_install(args: Any) -> int:
     from . import ci
 
     root = repo_dir(args)
-    return _run_checked(ci.install_command(_config.load(root), args.subproject), root, "install")
+    command = ci.install_command(_config.load(root), args.subproject)
+    if not command:  # a test-command subproject with no install: nothing to do
+        return 0
+    return _run_checked(command, root, "install")
 
 
 def _cmd_ci_test(args: Any) -> int:
