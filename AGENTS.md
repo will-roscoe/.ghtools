@@ -109,11 +109,21 @@ loads. ghtools imposes no particular extension.
 - A tested record is the ref `refs/ghtools/tested/<tree>`, written by a passing same-repo PR run (or
   locally, below). The push to the default branch reuses it only when the tree is identical, the
   record passed, and it covers every leg the push would run. A different tree (base moved, release
-  commit), a fork PR, a `[ci]` directive or any doubt runs everything.
+  commit), a fork PR, a CI-forcing directive (`[ci]`, `[test]`, `[lint]`, ... with `directives.enabled`) or
+  any doubt runs every leg with nothing reused. A directive, a push that would release the root, and a
+  push with a component due a release also deselect nothing (below).
+- A run that can release is tested in full. When a component is due, the run also tests every in-tree
+  subproject, not only the touched ones, and runs CI even if no `ci.paths` file changed, as a releasing
+  root does. The reuse step still applies to them as it does to the root.
 - `[[ci.select]]` rules (`marker`, `changed` globs) end `ci test` with `-m "not <marker>"` when no
   changed file matches. No rules, an unknown base, a computed merge base equal to HEAD, or an event in
-  `ci.select-full-on` deselects nothing. The deselect is appended as a final `-m`, and-joined with any
-  existing one.
+  `ci.select-full-on` deselects nothing, and neither does a push that is forced by a directive, would
+  release the root or is due to release a component. The deselect is appended as a final `-m`, and-joined
+  with any `-m` already in the `ci.test` command. It overrides an `addopts = -m ...` in the pytest
+  config, which is not read, so such a run collects more tests, never fewer. Selection applies to a
+  component's pytest row too (its tests carry rule markers like any others, and rule globs are
+  relative to the repo root); only a `test-command` row is exempt. With a deselection, pytest exit 5
+  (nothing collected) counts as a pass.
 - A record stores the selection it ran. In a repo with rules, it covers a run only if it made a claim
   and left out nothing this run wants (a full run, or one that deselected no more than this run does).
   A record with no selection claim counts as a full run only in a repo with no rules.
@@ -123,6 +133,10 @@ loads. ghtools imposes no particular extension.
   (base defaults to `origin`). It refuses `--subproject` and `--deselect` (it tests every
   subproject), and never replaces a record CI made: it prints a notice and exits 0. To redo one, drop it
   with `ghtools ci drop-tested`. Reuse accepts a local record only with `ci.accept-local-tested = true`.
+- A local record also runs the test-stage lint gates (`ci.gates`, `[[ci.gate]]`, as CI's lint job
+  does, without installing their tools) and records the result in the legs like CI. A failing gate
+  records nothing. Reuse accepts a local record only if its gates passed, whenever the repo has such
+  gates. Local legs appear on the status card as tested but add no row to the builds list.
 - Gitignored files are not part of the tree, so a record does not check them.
 
 ```toml
@@ -169,8 +183,8 @@ install = []
 Other row keys: `kind` (`in-tree` or `submodule`; submodules never release here), `install`, `setup`.
 
 - **Tags** are `{name}/{version}` (e.g. `cdn/0.4.1`). The root's version is the newest `vX.Y.Z` tag, so
-  component tags never count toward it, and a template that differs from a name's plain tag is never
-  mistaken for another component's.
+  component tags never count toward it. A released component's `tag` template must contain `{name}`
+  (and `{version}`), or config check fails: `v{version}` would collide with the root's tags.
 - **Decision:** commits since a component's latest tag count only if they touch its `path` or the path
   of anything in its `needs` (transitively). Types and bump rules are as for the root. The first release
   of an untagged component counts from the first commit.
@@ -179,12 +193,17 @@ Other row keys: `kind` (`in-tree` or `submodule`; submodules never release here)
   first". Tag the current version, then continue. A missing or unreadable version file applies no guard.
 - **Backfilling** past release points: create **lightweight** tags (`git tag cdn/0.3.0 <sha>`). Never
   annotate them `Release <tag>`, or the next run would resume them and publish old releases. Push them
-  before the first component release.
+  before the first component release. Turning on `release = true` without backfilled tags releases
+  each untagged component on the next default-branch push, counted from the first commit, unless its
+  version file is ahead of that computed version, in which case the downgrade guard stops it. Backfill
+  first.
 - **`test-command` rows:** the row's test leg runs the command from the repo root. No `pytest` or
-  `pytest-cov` is installed unless the row's `install` lists them (an empty `install` installs
-  nothing). No junit or coverage files are produced unless the command writes them. The leg still runs
+  `pytest-cov` is installed unless the leg installs something: when the row's `install` (or, for an
+  empty `install` and no `test-command`, `-e ./<path>`) or that of any row in its `needs` is non-empty,
+  the install step adds `pytest` and `pytest-cov` after them, whether or not `install` lists them. With
+  an empty `install` and nothing from `needs`, nothing is installed. No junit or coverage files are produced unless the command writes them. The leg still runs
   `actions/setup-python`, which is harmless for non-Python code. Selection never applies to it: it runs
-  in full.
+  in full (unlike a pytest row, which is selected).
 - **`release-components` job** (runs on the default branch after tests and lint pass, when any component
   is released, after the root `release` job): decides, then writes version files and changelogs,
   makes **one commit** for all of them (`chore(release): cdn 0.4.1, site 1.0.0 [skip ci]`, plus an
