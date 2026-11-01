@@ -511,6 +511,7 @@ def export(cfg: Config) -> dict[str, Any]:
     ``matrix.include`` legs have their runner resolved against the shipped python build snapshot
     (see :mod:`ghtools.runners`); legs no runner can run are omitted.
     """
+    from .components import released  # local import: components imports config
     from .runners import resolve_matrix  # local import: runners imports config
 
     python, runners = cfg.get("ci.python"), cfg.get("ci.runners")
@@ -529,6 +530,7 @@ def export(cfg: Config) -> dict[str, Any]:
         "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
         "status": {"enabled": cfg.get("status.enabled")},
         "subprojects": bool(in_tree(cfg)),
+        "components": bool(released(cfg)),
         "release": {
             "enabled": cfg.get("release.enabled"),
             "commit": cfg.get("release.commit"),

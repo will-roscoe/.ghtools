@@ -250,3 +250,36 @@ def test_docs_changed_runs_for_ghtools_settings(git_repo):
     base = git_repo.run("rev-parse", "HEAD").strip()
     git_repo.commit("ci: cfg", {".github/ghtools.toml": "branch = 'main'\n"})
     assert ci.docs_changed(cfg, git_repo.path, base) is True
+
+
+def test_docs_changed_scoped_to_component(git_repo):
+    cfg = config.from_dict(
+        {
+            "docs": {"paths": ["docs/**"]},
+            "subprojects": [
+                {"name": "base", "path": "src/base"},
+                {
+                    "name": "cdn",
+                    "path": "src/cdn",
+                    "release": True,
+                    "needs": ["base"],
+                    "docs-paths": ["extra/*.md"],
+                },
+                {"name": "other", "path": "src/other", "release": True},
+            ],
+        }
+    )
+    plain = config.from_dict({"docs": {"paths": ["docs/**"]}})
+    git_repo.commit("feat: a", {"a.py": "1"})
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("feat: o", {"src/other/x.py": "1"})
+    assert ci.docs_changed(cfg, git_repo.path, base) is True  # a released component's path
+    assert ci.docs_changed(plain, git_repo.path, base) is False  # no components: as before
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("test: t", {"tests/t.py": "1", "src/cdn-docs/x": "1"})
+    assert ci.docs_changed(cfg, git_repo.path, base) is False  # a sibling prefix is not the path
+    git_repo.commit("docs: e", {"extra/guide.md": "x"})
+    assert ci.docs_changed(cfg, git_repo.path, base) is True  # docs-paths
+    base = git_repo.run("rev-parse", "HEAD").strip()
+    git_repo.commit("fix: b", {"src/base/b.py": "1"})
+    assert ci.docs_changed(cfg, git_repo.path, base) is True  # a needed subproject

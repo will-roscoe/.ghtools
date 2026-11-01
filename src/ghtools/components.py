@@ -36,6 +36,8 @@ class Component:
     :ivar changelog: its changelog (default ``<path>/CHANGELOG.md``).
     :ivar tag: the tag template, using only ``{name}`` and ``{version}``.
     :ivar needs_paths: paths of every subproject it needs, transitively, dependencies first.
+    :ivar apidoc: package paths the docs job runs ``sphinx-apidoc`` over.
+    :ivar docs_paths: extra globs whose change rebuilds the docs.
     """
 
     name: str
@@ -44,6 +46,8 @@ class Component:
     changelog: str
     tag: str
     needs_paths: tuple[str, ...]
+    apidoc: tuple[str, ...] = ()
+    docs_paths: tuple[str, ...] = ()
 
     def tag_for(self, version: str) -> str:
         """The tag name for `version`, e.g. ``cdn/0.4.1``."""
@@ -80,6 +84,8 @@ def released(cfg: Config) -> list[Component]:
                 changelog=row["changelog"] or f"{row['path']}/CHANGELOG.md",
                 tag=row["tag"],
                 needs_paths=tuple(rows[n]["path"] for n in order),
+                apidoc=tuple(row["apidoc"]),
+                docs_paths=tuple(row["docs-paths"]),
             )
         )
     return out

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ghtools import scaffold
+from ghtools import config, scaffold
 from ghtools.gates import BUILTIN
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -514,3 +514,50 @@ def test_export_flags_rules_only_when_set():
     assert config.export(config.from_dict({}))["select"] is False
     cfg = config.from_dict({"ci": {"select": [{"marker": "tui", "changed": ["src/**"]}]}})
     assert config.export(cfg)["select"] is True
+
+
+def test_release_components_job_skipped_without_components():
+    jobs = _jobs()
+    job = jobs["release-components"]
+    assert "needs.config.outputs.components != '[]'" in job["if"]
+    assert "always()" in job["if"] and "needs.config.outputs.default-ref == 'true'" in job["if"]
+    assert set(jobs["release"]["needs"]) <= set(job["needs"])
+    config_job = jobs["config"]
+    assert config_job["outputs"]["components"].endswith("|| '[]' }}")
+    step = next(s for s in config_job["steps"] if s.get("id") == "components")
+    assert "fromJSON(steps.export.outputs.config).components" in step["if"]
+    # Without components the export flag is false, so the step is skipped and the output is '[]'.
+    assert config.export(config.from_dict({}))["components"] is False
+    cfg = config.from_dict({"subprojects": [{"name": "a", "path": "a", "release": True}]})
+    assert config.export(cfg)["components"] is True
+    # status still runs whatever a skipped needs entry says, and reads no needs result
+    status = jobs["status"]
+    assert "release-components" in status["needs"]
+    assert "always()" in status["if"] and "needs.*" not in status["if"]
+    for s in status["steps"]:
+        assert "needs.*.result" not in str(s)
+
+
+def test_release_components_values_reach_shell_through_env_only():
+    job = _jobs()["release-components"]
+    for step in job["steps"]:
+        assert "${{" not in step.get("run", ""), step.get("name")
+    gh = next(s for s in job["steps"] if s.get("name") == "GitHub releases")
+    assert '"Release $tag"' in str(
+        _step("release-components", "Prepare the release commit and tags locally")["run"]
+    )
+    assert '--title "$name $version"' in gh["run"] and "--verify-tag" in gh["run"]
+    assert "ghtools release components decide" in _step("release-components", "Decide")["run"]
+
+
+def test_race_handling_present():
+    job = _jobs()["release-components"]
+    assert "release" in job["needs"]  # the root release lands first; never two pushes at once
+    push = _step("release-components", "Push release commit and tags")["run"]
+    assert "git fetch --quiet origin" in push and "FETCH_HEAD" in push
+    assert 'echo "pushed=false"' in push and "moved since this run started" in push
+    assert "git push --atomic" in push
+    publish = next(s for s in job["steps"] if s.get("name") == "GitHub releases")
+    assert "steps.push.outputs.pushed == 'true'" in publish["if"]
+    prep = _step("release-components", "Prepare the release commit and tags locally")["run"]
+    assert "select(.resume | not)" in prep  # resumed rows are not re-tagged or re-committed

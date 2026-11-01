@@ -183,11 +183,26 @@ def code_changed(cfg: Config, root: Path, base: str | None) -> bool:
 
 def docs_changed(cfg: Config, root: Path, base: str | None) -> bool:
     """Should the docs job run? With docs.paths empty always; otherwise only if the change since
-    `base` touches one of those globs (or ghtools's own settings or stub). Unknown base: True."""
+    `base` touches one of those globs (or ghtools's own settings or stub). Unknown base: True.
+
+    With released components, a change under a component's ``path``, ``docs-paths`` or a needed
+    subproject's path also counts; without them the result is as above.
+    """
     patterns = [glob_to_regex(p) for p in cfg.get("docs.paths")]
     if not patterns:
         return True
     files = changed_files(base or "", root)
     if files is None:
         return True
-    return any(f in _ALWAYS or any(p.match(f) for p in patterns) for f in files)
+    from .components import released  # local import: components imports config
+
+    prefixes: list[str] = []
+    for c in released(cfg):
+        patterns += [glob_to_regex(p) for p in c.docs_paths]
+        prefixes += [p.strip("/") for p in (c.path, *c.needs_paths)]
+    return any(
+        f in _ALWAYS
+        or any(p.match(f) for p in patterns)
+        or any(x in ("", ".") or f.startswith(x + "/") for x in prefixes)
+        for f in files
+    )
