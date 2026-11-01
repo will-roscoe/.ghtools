@@ -4,6 +4,8 @@ Shared GitHub tooling for will-roscoe's repositories. CI, Conventional-Commit re
 and the status card are defined once here. Each repo *references* them, so a
 change here reaches every repo on its next run without a commit to that repo.
 
+Agents adopting, configuring or changing ghtools: read [AGENTS.md](AGENTS.md).
+
 ## Using it in a repo
 
 ```bash
@@ -149,6 +151,33 @@ accept-local-tested = true     # trust a local `ghtools ci test --record`
 marker = "tui"
 changed = ["src/sph/phantom_live/**"]
 ```
+
+## Released components
+
+An in-tree `[[subprojects]]` row with `release = true` versions and releases on its own, alongside
+or instead of the repo's `v{x}` releases (`release.root = false` stops those). All keys are
+opt-in; a repo that sets none behaves as before.
+
+```toml
+[[subprojects]]
+name = "cdn"
+path = "src/cdn"
+release = true
+needs = ["common"]                       # its commits also count when `common` changes
+version-file = "src/cdn/pyproject.toml"  # default <path>/pyproject.toml (.toml or JSON manifest)
+changelog = "src/cdn/CHANGELOG.md"       # default <path>/CHANGELOG.md
+tag = "{name}/{version}"                 # default; tags look like cdn/0.4.1
+apidoc = ["src/cdn/cdn"]                 # sphinx-apidoc into <docs.dir>/api/cdn/
+test-command = ""                        # set to run a command instead of pytest
+
+[status]
+layout = "components"                    # a Repository block plus one block per component
+```
+
+The `release-components` job commits every component's version and changelog in one commit and
+pushes it with all the new tags in one atomic push. A component whose version file is ahead of its
+tags is not released until you tag that version. `ghtools release components decide` prints
+each decision and its reason. Details and pitfalls are in [AGENTS.md](AGENTS.md).
 
 ## Commit directives
 
