@@ -319,11 +319,15 @@ def _components_data():
 def test_component_blocks_built(tmp_path):
     m = model.build_model(_components_data(), _components_cfg(), tmp_path)
     top, cdn, fs = m["blocks"]
-    assert top["name"] == "arcturus-stack" and top["lint"]["state"] == "pass"
+    assert (
+        top["name"] == "Repository"
+        and top["docs"]["value"] == "✓ Built"
+        and top["lint"]["state"] == "pass"
+    )
     assert (cdn["name"], cdn["version"]) == ("cdn", "0.4.1")  # unreleased "plain" has no block
     assert cdn["tests"] == {"value": "✓ 10", "state": "pass"}
     assert fs["tests"] == {"value": "✗ 2 failed", "state": "fail"}
-    assert cdn["docs"]["value"] == "✓ Built"
+    assert "docs" not in cdn and "docs" not in fs  # the docs build is not per component
     assert m["cards"] == []
     assert len({(b["x"], b["y"]) for b in m["blocks"]}) == 3
     svg = model.render_card(_components_data(), _components_cfg(), tmp_path)
@@ -365,5 +369,6 @@ def test_component_without_tag_shows_no_version(tmp_path, git_repo):
     data = {**_components_data(), "project": frag}
     svg = model.render_card(data, cfg, tmp_path)
     assert ">v0.2.0<" in svg and ">v0.0.0<" not in svg and ">v<" not in svg
-    assert svg.count(">v") == 1  # only cdn shows a version; the untagged component shows none
+    assert svg.count(">v") == 1  # only cdn shows a version
+    assert svg.count(">not released<") == 1  # the untagged component says so
     assert [b["version"] for b in model.build_model(data, cfg, tmp_path)["blocks"]][2] == ""

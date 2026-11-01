@@ -166,9 +166,11 @@ def _tests_result(leg: dict[str, Any] | None) -> dict[str, str]:
 def _blocks(data: dict[str, dict[str, Any]], cfg: Config) -> list[dict[str, Any]]:
     """The components layout: a top block for the repo, then one per released component.
 
-    Each block is ``{name, version, tests, docs}`` where ``tests`` and ``docs`` are
-    ``{value, state}``; the repo block has ``lint`` and no ``tests``. A component that has never
-    been tagged has ``version == ""``. Results for components a run did not touch were
+    A component block is ``{name, version, tests}`` and the block titled ``Repository`` is
+    ``{name, version, lint, docs}``; ``tests``, ``lint`` and ``docs`` are ``{value, state}``.
+    Docs appear only on the repo block, since the docs build is not per component. A component
+    that has never been tagged has ``version == ""`` (the card says "not released").
+    Results for components a run did not touch were
     carried over from the previous CI fragment by :func:`..fragments.ci_fragment`.
     """
     ci, project = data.get("ci", {}), data.get("project", {})
@@ -178,7 +180,7 @@ def _blocks(data: dict[str, dict[str, Any]], cfg: Config) -> list[dict[str, Any]
     legs = ci.get("subproject_legs") or {}
     blocks: list[dict[str, Any]] = [
         {
-            "name": _clip(project.get("name", ""), BLOCK_NAME_CHARS),
+            "name": "Repository",
             "version": project.get("version", ""),
             "lint": lint,
             "docs": docs,
@@ -190,7 +192,6 @@ def _blocks(data: dict[str, dict[str, Any]], cfg: Config) -> list[dict[str, Any]
                 "name": _clip(c.name, BLOCK_NAME_CHARS),
                 "version": versions.get(c.name, ""),
                 "tests": _tests_result(legs.get(c.name)),
-                "docs": docs,
             }
         )
     for i, block in enumerate(blocks):

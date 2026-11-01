@@ -49,6 +49,8 @@ svg { font-family: var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont,
 <text class="subtitle text" font-weight="600" x="[[ b.x + 15 ]]" y="[[ b.y + 27 ]]">[[ b.name ]]</text>
 [% if b.version %]
 <text class="small mono muted" x="[[ b.x + 15 ]]" y="[[ b.y + 46 ]]">v[[ b.version ]]</text>
+[% elif b.tests is defined %]
+<text class="small mono muted" x="[[ b.x + 15 ]]" y="[[ b.y + 46 ]]">not released</text>
 [% endif %]
 [% if b.tests is defined %]
 <text class="label mono muted" x="[[ b.x + 15 ]]" y="[[ b.y + 72 ]]">TESTS</text>
@@ -57,8 +59,10 @@ svg { font-family: var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont,
 <text class="label mono muted" x="[[ b.x + 15 ]]" y="[[ b.y + 72 ]]">LINT</text>
 <text class="small mono [[ b.lint.state ]]" x="[[ b.x + 75 ]]" y="[[ b.y + 72 ]]">[[ b.lint.value ]]</text>
 [% endif %]
+[% if b.docs is defined %]
 <text class="label mono muted" x="[[ b.x + 15 ]]" y="[[ b.y + 94 ]]">DOCS</text>
 <text class="small mono [[ b.docs.state ]]" x="[[ b.x + 75 ]]" y="[[ b.y + 94 ]]">[[ b.docs.value ]]</text>
+[% endif %]
 [% endfor %]
 [% endif %]
 [% for p in panels %]
