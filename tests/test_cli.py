@@ -386,3 +386,19 @@ def test_gated_record_round_trips_and_a_gateless_one_is_refused(tmp_path, monkey
     assert reuse.lookup(repo.path, tmp_path / "o2", m, **kw) is False
     assert reuse.is_tested(repo.path, "HEAD", **kw) is False
     assert reuse.lookup(repo.path, tmp_path / "o3", m, accept_local=True) is True  # no lint applies
+
+
+def test_reuse_no_local_refuses_a_local_record_even_when_accepted(tmp_path, monkeypatch, capsys):
+    from ghtools import config
+    from ghtools.subprojects import matrix
+
+    repo, _ = _record_repo(tmp_path, "accept-local-tested = true\n")
+    _fake_bash(monkeypatch)
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0
+    m, _ = matrix(config.load(repo.path), repo.path, "", "HEAD", force=True)
+    base = ["-C", str(repo.path), "ci", "reuse", "--matrix", json.dumps(m)]
+    capsys.readouterr()
+    assert main([*base, "--out", str(tmp_path / "o1")]) == 0
+    assert capsys.readouterr().out.strip() == "true"
+    assert main([*base, "--out", str(tmp_path / "o2"), "--no-local"]) == 0
+    assert capsys.readouterr().out.strip() == "false"

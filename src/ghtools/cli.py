@@ -486,10 +486,11 @@ def _cmd_ci_select(args: Any) -> int:
     return 0
 
 
-def _reuse_selection(root: Path, deselect: str) -> dict[str, Any]:
+def _reuse_selection(root: Path, deselect: str, no_local: bool = False) -> dict[str, Any]:
     """Keyword arguments for reuse.lookup/is_tested: the markers this run leaves out
-    (`--deselect` JSON), whether the repo has ci.select rules, ci.accept-local-tested, and
-    whether lint gates apply (a local record must then show them passing)."""
+    (`--deselect` JSON), whether the repo has ci.select rules, ci.accept-local-tested (forced
+    off by `no_local`), and whether lint gates apply (a local record must then show them
+    passing)."""
     from . import gates
 
     want = json.loads(deselect) if deselect else []
@@ -497,7 +498,7 @@ def _reuse_selection(root: Path, deselect: str) -> dict[str, Any]:
     return {
         "want": want,
         "has_rules": bool(cfg.get("ci.select")),
-        "accept_local": cfg.get("ci.accept-local-tested"),
+        "accept_local": bool(cfg.get("ci.accept-local-tested")) and not no_local,
         "needs_gates": bool(gates.resolve(cfg, "test")),
     }
 
@@ -552,7 +553,8 @@ def _cmd_ci_reuse(args: Any) -> int:
 
     root = repo_dir(args)
     matrix = json.loads(args.matrix)
-    if reuse.lookup(root, Path(args.out), matrix, **_reuse_selection(root, args.deselect)):
+    kwargs = _reuse_selection(root, args.deselect, no_local=args.no_local)
+    if reuse.lookup(root, Path(args.out), matrix, **kwargs):
         print("true")
     else:
         print("false")
@@ -699,6 +701,11 @@ def _ci_commands(sub: Any) -> None:
     ru.add_argument("--out", required=True, help="directory to write the recorded legs to")
     ru.add_argument(
         "--deselect", default="", help="JSON list of pytest markers this run leaves out (ci select)"
+    )
+    ru.add_argument(
+        "--no-local",
+        action="store_true",
+        help="refuse local records even with ci.accept-local-tested (a releasing push)",
     )
     ru.set_defaults(handler=_cmd_ci_reuse)
     dt = cs.add_parser("drop-tested", help="delete the record for HEAD's tree")

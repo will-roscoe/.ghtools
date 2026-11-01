@@ -655,3 +655,20 @@ def test_selection_never_deselects_on_a_forced_or_releasing_run(tmp_path, extra,
         assert "deselect=[]" in out and "ci select" not in calls
     else:
         assert 'deselect=["tui"]' in out
+
+
+@pytest.mark.parametrize(
+    ("extra", "flag"),
+    [
+        ({}, False),
+        ({"WOULD_RELEASE": "false", "COMPONENTS": "[]"}, False),
+        ({"WOULD_RELEASE": "true"}, True),
+        ({"COMPONENTS": '[{"name":"a"}]'}, True),
+    ],
+)
+def test_reuse_refuses_local_records_only_when_releasing(tmp_path, extra, flag):
+    ids = [s.get("id") for s in _pipeline()["jobs"]["config"]["steps"]]
+    assert ids.index("decide") < ids.index("reuse") and ids.index("components") < ids.index("reuse")
+    env = {"MATRIX": "{}", "DESELECT": "", "RUNNER_TEMP": str(tmp_path), **extra}
+    _, calls = _run_step(tmp_path, "reuse", env, 'echo "false"')
+    assert ("--no-local" in calls) is flag

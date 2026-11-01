@@ -163,9 +163,13 @@ jobs:
         env:
           MATRIX: ${{ steps.matrix.outputs.matrix }}
           DESELECT: ${{ steps.select.outputs.deselect }}
+          WOULD_RELEASE: ${{ steps.decide.outputs.released }}
+          COMPONENTS: ${{ steps.components.outputs.components }}
         run: |
           reuse_args=()
           if [ -n "$DESELECT" ]; then reuse_args+=(--deselect "$DESELECT"); fi
+          # A release needs one clean CI run: a local record (long-lived venvs) never covers it.
+          if [ "$WOULD_RELEASE" = "true" ] || { [ -n "$COMPONENTS" ] && [ "$COMPONENTS" != "[]" ]; }; then reuse_args+=(--no-local); fi
           reused="$(ghtools ci reuse --matrix "$MATRIX" --out "$RUNNER_TEMP/reused-legs" "${reuse_args[@]}")"
           echo "reused=$reused" >> "$GITHUB_OUTPUT"
           if [ "$reused" = "true" ]; then
