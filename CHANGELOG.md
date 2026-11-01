@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-01
+
+### Bug fixes
+
+- **ci**: skip-pr skips only when the head tree has a tested ref
+
 ## [1.9.0] - 2026-10-31
 
 ### Features
