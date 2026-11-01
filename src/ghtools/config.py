@@ -406,8 +406,12 @@ def _is_compound(command: str) -> bool:
         return False
 
 
-def _check_tag(where: str, template: str) -> None:
-    """Reject a tag template lacking ``{version}`` or using fields beyond name and version."""
+def _check_tag(where: str, template: str, need_name: bool = False) -> None:
+    """Reject a tag template lacking ``{version}`` or using fields beyond name and version.
+
+    With `need_name` (a released component) it must also contain ``{name}``: without it the tags
+    collide with the root's ``v{version}`` tags or with another component's.
+    """
     try:
         parsed = list(string.Formatter().parse(template))
     except ValueError as exc:
@@ -421,6 +425,11 @@ def _check_tag(where: str, template: str) -> None:
         )
     if "version" not in fields:
         raise ConfigError(f"{where}: {template!r} must contain {{version}}")
+    if need_name and "name" not in fields:
+        raise ConfigError(
+            f"{where}: {template!r} must contain {{name}} so a component's tags cannot collide "
+            "with the root's or another component's"
+        )
 
 
 def _check_subprojects(cfg: Config) -> None:
@@ -442,7 +451,7 @@ def _check_subprojects(cfg: Config) -> None:
         if row["name"] in names:
             raise ConfigError(f"subprojects[{i}].name: duplicate subproject {row['name']!r}")
         names.append(row["name"])
-        _check_tag(f"subprojects[{i}].tag", row["tag"])
+        _check_tag(f"subprojects[{i}].tag", row["tag"], need_name=row["release"])
         bases = [Path(a.rstrip("/")).name for a in row["apidoc"]]
         if len(set(bases)) != len(bases):
             raise ConfigError(

@@ -34,7 +34,7 @@ def test_overrides_are_kept():
                 "release": True,
                 "version-file": "x/package.json",
                 "changelog": "x/HISTORY.md",
-                "tag": "x-v{version}",
+                "tag": "{name}-v{version}",
             }
         )
     )
@@ -73,6 +73,13 @@ def test_tag_template_validated(tag):
 
 def test_tag_template_accepts_version_only():
     _cfg({"name": "a", "path": "a", "tag": "release-{version}"})
+
+
+@pytest.mark.parametrize("tag", ["v{version}", "release-{version}"])
+def test_released_component_tag_needs_name(tag):
+    with pytest.raises(ConfigError, match=r"subprojects\[0\]\.tag.*\{name\}"):
+        _cfg({"name": "a", "path": "a", "release": True, "tag": tag})
+    _cfg({"name": "a", "path": "a", "release": True, "tag": "{name}-v{version}"})
 
 
 def test_release_root_defaults_true():
