@@ -58,9 +58,10 @@ def record(
     """Push the record for HEAD's tree and return its ref. Legs: every `*.json` under `legs_dir`.
 
     `meta` says what the run covered: `{"source": "ci" | "local", "deselected": [markers]}`
-    (`source` defaults to "ci", `deselected` to none). It is stored as `meta.json` beside `legs/`
-    with the ghtools version and an ISO timestamp added. `None` writes a "ci", nothing-deselected
-    record.
+    (`source` defaults to "ci"). It is stored as `meta.json` beside `legs/` with the ghtools
+    version and an ISO timestamp added. Without a `deselected` key the file has none: the
+    selection is unknown, and :func:`covers_selection` accepts such a record only in a repo with
+    no rules. Pass `"deselected": []` to vouch for a full run.
     """
     root = Path(root)
     tree = tree_sha(root)
@@ -78,7 +79,6 @@ def record(
         ghtools_version = "unknown"
     body = {
         "source": "ci",
-        "deselected": [],
         **(meta or {}),
         "ghtools": ghtools_version,
         "at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -96,12 +96,13 @@ def record(
 def covers_selection(meta: dict[str, Any] | None, want: Sequence[str], has_rules: bool) -> bool:
     """Did the recorded run leave out nothing beyond the markers `want` leaves out?
 
-    `meta` is the record's `meta.json` (None for a record written before metadata existed, which
-    is covering only where the repo has no `ci.select` rules, `has_rules` False).
+    `meta` is the record's `meta.json`. None (a record from before metadata existed) and a meta
+    without a `deselected` key (selection unknown) both cover only where the repo has no
+    `ci.select` rules (`has_rules` False). `"deselected": []` is a vouched full run.
     """
-    if meta is None:
+    if meta is None or "deselected" not in meta:
         return not has_rules
-    return set(meta.get("deselected") or []) <= set(want)
+    return set(meta["deselected"] or []) <= set(want)
 
 
 def _covers(legs: list[dict[str, Any]], matrix: dict[str, Any], local: bool = False) -> bool:
@@ -149,12 +150,12 @@ def _usable(
 ) -> tuple[bool, bool]:
     """Is the fetched record's selection acceptable? Returns (usable, local source)."""
     meta = _read_meta(root)
-    if meta is _UNREADABLE:
+    if meta is not None and not isinstance(meta, dict):  # _UNREADABLE
         return False, False
-    local = isinstance(meta, dict) and meta.get("source") == "local"
+    local = meta is not None and meta.get("source") == "local"
     if local and not accept_local:
         return False, local
-    return covers_selection(meta, want, has_rules), local  # type: ignore[arg-type]
+    return covers_selection(meta, want, has_rules), local
 
 
 def lookup(

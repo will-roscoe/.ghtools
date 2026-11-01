@@ -291,15 +291,9 @@ def _cmd_ci_select(args: Any) -> int:
 
 def _reuse_selection(root: Path, deselect: str) -> dict[str, Any]:
     """Keyword arguments for reuse.lookup/is_tested: the markers this run leaves out
-    (`--deselect` JSON), whether the repo has ci.select rules, and ci.accept-local-tested.
-    Without a readable config only `want` is set."""
-    from .errors import ConfigError
-
+    (`--deselect` JSON), whether the repo has ci.select rules, and ci.accept-local-tested."""
     want = json.loads(deselect) if deselect else []
-    try:
-        cfg = _config.load(root)
-    except ConfigError:  # reuse never needed a config; without one, behave as before
-        return {"want": want}
+    cfg = _config.load_or_defaults(root)  # no config file: defaults; a malformed one raises
     return {
         "want": want,
         "has_rules": bool(cfg.get("ci.select")),
@@ -344,10 +338,10 @@ def _cmd_ci_docs_changed(args: Any) -> int:
 def _cmd_ci_record_tested(args: Any) -> int:
     from . import reuse
 
-    meta = {
-        "source": args.source,
-        "deselected": json.loads(args.deselect) if args.deselect else [],
-    }
+    # No --deselect: the selection is unknown, so the record vouches for no full run.
+    meta = {"source": "ci"}
+    if args.deselect:
+        meta["deselected"] = json.loads(args.deselect)
     print(reuse.record(repo_dir(args), Path(args.legs), meta=meta))
     return 0
 
@@ -488,7 +482,6 @@ def _ci_commands(sub: Any) -> None:
     )
     rt.add_argument("--legs", required=True)
     rt.add_argument("--deselect", default="", help="JSON list of pytest markers the run left out")
-    rt.add_argument("--source", choices=["ci", "local"], default="ci", help="who ran the tests")
     rt.set_defaults(handler=_cmd_ci_record_tested)
     ru = cs.add_parser(
         "reuse", help="was HEAD's tree already tested by a pull request? (true/false)"

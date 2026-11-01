@@ -186,3 +186,42 @@ def test_defaults_match_old_behaviour(git_repo, tmp_path):
     assert reuse.lookup(git_repo.path, tmp_path / "o", MATRIX) is True
     assert reuse.is_tested(git_repo.path, "HEAD") is True
     assert reuse.covers_selection(None, (), False) is True
+
+
+def test_unknown_selection_is_not_a_full_run(git_repo, tmp_path):
+    _remote(tmp_path, git_repo)
+    git_repo.commit("feat: a", {"a.py": "1"})
+    ref = reuse.record(git_repo.path, _legs(tmp_path))
+    assert "deselected" not in _fetch_meta(git_repo, ref)
+    assert reuse.covers_selection({"source": "ci"}, [], True) is False
+    assert reuse.lookup(git_repo.path, tmp_path / "o", MATRIX, has_rules=True) is False
+    assert reuse.is_tested(git_repo.path, "HEAD", has_rules=True) is False
+    assert reuse.lookup(git_repo.path, tmp_path / "o2", MATRIX) is True  # no rules: as before
+
+
+def test_explicit_empty_selection_is_a_full_run(git_repo, tmp_path):
+    _remote(tmp_path, git_repo)
+    git_repo.commit("feat: a", {"a.py": "1"})
+    reuse.record(git_repo.path, _legs(tmp_path), meta={"deselected": []})
+    assert reuse.lookup(git_repo.path, tmp_path / "o", MATRIX, has_rules=True) is True
+    assert reuse.is_tested(git_repo.path, "HEAD", has_rules=True) is True
+
+
+def test_accepted_local_record_must_still_cover_selection(git_repo, tmp_path):
+    _remote(tmp_path, git_repo)
+    git_repo.commit("feat: a", {"a.py": "1"})
+    local_leg = {"status": "passing", "subproject": ""}
+    meta = {"source": "local", "deselected": ["tui"]}
+    reuse.record(git_repo.path, _legs(tmp_path, local_leg), meta=meta)
+    assert reuse.is_tested(git_repo.path, "HEAD", want=[], accept_local=True) is False
+    assert reuse.lookup(git_repo.path, tmp_path / "o", MATRIX, want=[], accept_local=True) is False
+    assert reuse.is_tested(git_repo.path, "HEAD", want=["tui"], accept_local=True) is True
+
+
+def test_reuse_command_fails_cleanly_on_malformed_config(git_repo, tmp_path, capsys):
+    _remote(tmp_path, git_repo)
+    git_repo.commit("feat: a", {"a.py": "1", ".github/ghtools.toml": "[ci\n"})
+    args = ["-C", str(git_repo.path), "ci", "reuse", "--matrix", json.dumps(MATRIX)]
+    assert main([*args, "--out", str(tmp_path / "out")]) == 1
+    err = capsys.readouterr().err
+    assert "ghtools.toml" in err and "Traceback" not in err
