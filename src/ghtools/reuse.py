@@ -157,15 +157,42 @@ def _read_meta(root: Path) -> dict[str, Any] | None | object:
     return meta if isinstance(meta, dict) else _UNREADABLE
 
 
+def _gates_passed(root: Path) -> bool:
+    """Do the fetched record's legs show the lint gates passing (and none failing)?
+
+    A leg's `gates` is "passing", "failing" or "" (the gates did not run in that leg), as CI's
+    status legs record it. Unreadable legs count as not passed.
+    """
+    try:
+        names = _git_in(root, "ls-tree", "--name-only", "FETCH_HEAD:legs").split()
+        gates = [
+            json.loads(_git_in(root, "show", f"FETCH_HEAD:legs/{n}")).get("gates")
+            for n in names
+            if n.endswith(".json")
+        ]
+    except (PreconditionError, json.JSONDecodeError, AttributeError):
+        return False
+    return "passing" in gates and "failing" not in gates
+
+
 def _usable(
-    root: Path, want: Sequence[str], has_rules: bool, accept_local: bool
+    root: Path,
+    want: Sequence[str],
+    has_rules: bool,
+    accept_local: bool,
+    needs_gates: bool = False,
 ) -> tuple[bool, bool]:
-    """Is the fetched record's selection acceptable? Returns (usable, local source)."""
+    """Is the fetched record's selection acceptable? Returns (usable, local source).
+
+    With `needs_gates`, a local record is also refused unless its legs show the gates passing.
+    """
     meta = _read_meta(root)
     if meta is not None and not isinstance(meta, dict):  # _UNREADABLE
         return False, False
     local = meta is not None and meta.get("source") == "local"
     if local and not accept_local:
+        return False, local
+    if local and needs_gates and not _gates_passed(root):
         return False, local
     return covers_selection(meta, want, has_rules), local
 
@@ -178,6 +205,7 @@ def lookup(
     want: Sequence[str] = (),
     has_rules: bool = False,
     accept_local: bool = False,
+    needs_gates: bool = False,
 ) -> bool:
     """Is HEAD's tree recorded as tested, by passing legs covering `matrix`? If so, write the
     recorded legs to `out_dir` (for the status card) and return True. Any doubt returns False.
@@ -185,13 +213,14 @@ def lookup(
     The record must also cover the selection (:func:`covers_selection` with `want`, the markers
     this run would leave out, and `has_rules`: whether the repo has `ci.select` rules). A
     `source: "local"` record is refused unless `accept_local`; an accepted one covers the matrix
-    by subproject only.
+    by subproject only, and with `needs_gates` (the repo's lint gates apply) only if its legs
+    record the gates passing.
     """
     root = Path(root)
     tree = tree_sha(root)
     try:
         _git_in(root, "fetch", "--quiet", "--no-tags", "--depth=1", remote, ref_for(tree))
-        ok, local = _usable(root, want, has_rules, accept_local)
+        ok, local = _usable(root, want, has_rules, accept_local, needs_gates)
         if not ok:
             return False
         listing = _git_in(root, "ls-tree", "--name-only", "FETCH_HEAD:legs").split()
@@ -218,6 +247,7 @@ def is_tested(
     want: Sequence[str] = (),
     has_rules: bool = False,
     accept_local: bool = False,
+    needs_gates: bool = False,
 ) -> bool:
     """Is the tree of `rev` recorded under refs/ghtools/tested/, by a record covering the
     selection (see :func:`lookup`)? Any doubt (unknown rev, no remote, fetch failure) returns
@@ -225,7 +255,7 @@ def is_tested(
     try:
         tree = tree_sha(Path(root), rev)
         _git_in(root, "fetch", "--quiet", "--no-tags", "--depth=1", remote, ref_for(tree))
-        return _usable(Path(root), want, has_rules, accept_local)[0]
+        return _usable(Path(root), want, has_rules, accept_local, needs_gates)[0]
     except (PreconditionError, subprocess.SubprocessError, OSError):
         return False
 

@@ -367,21 +367,23 @@ def _cmd_ci_test(args: Any) -> int:
 
 
 def _record_local_run(args: Any, root: Path) -> int:
-    """`ci test --record`: run the tests, then publish a tested record for HEAD's tree.
+    """`ci test --record`: run the lint gates and the tests, then record HEAD's tree as tested.
 
     Refuses, before running anything, a tree with uncommitted or untracked files (the record
     claims HEAD's tree passed) and a repo with no `origin`. Tests only what `--subproject` names, or
     else the root (profile python) and every in-tree subproject. The markers left out are
     :func:`ghtools.selection.deselected` against `--base` (default: merge-base with
     ``origin/<branch>``; unknown, or equal to HEAD, means a full run). Nothing is recorded
-    unless every leg passes and the tree is still untouched, and an existing CI record for the
-    tree is left alone. Only tracked content is vouched for: gitignored files are not checked.
+    unless the test-stage gates (:func:`ghtools.gates.resolve`, the ones CI's lint job runs) and
+    every leg pass and the tree is still untouched, and an existing CI record for the
+    tree is left alone. The gates are recorded in the root leg (profile python) or a lint-only
+    leg, as CI records them. Only tracked content is vouched for: gitignored files are not checked.
     Prints the ref. Raises PreconditionError (also for `--subproject` or `--deselect`, which
     would make a partial or contradictory claim) or CheckFailed.
     """
     import tempfile
 
-    from . import ci, reuse, selection
+    from . import ci, gates, reuse, selection
     from .errors import CheckFailed, PreconditionError
     from .status import fragments as fr
 
@@ -418,6 +420,12 @@ def _record_local_run(args: Any, root: Path) -> int:
     if not names:
         raise PreconditionError("nothing to test: profile is not python and no in-tree subprojects")
     python = f"{sys.version_info.major}.{sys.version_info.minor}"
+    # The gates CI's lint job runs, once up front: a failing gate records nothing.
+    gate_specs = gates.resolve(cfg, "test")
+    try:
+        gates.run(gate_specs, root)
+    except CheckFailed as exc:
+        raise CheckFailed(f"{exc}; nothing recorded") from exc
     legs: dict[str, dict[str, Any]] = {}
     for name in names:
         for out in ("junit.xml", "coverage.xml"):  # a stale report must not describe this leg
@@ -435,12 +443,24 @@ def _record_local_run(args: Any, root: Path) -> int:
             python,
             "local",
             "success",
-            "",
+            "success" if cfg.get("profile") == "python" and not name else "",
             fr.parse_junit(root / "junit.xml"),
             fr.parse_coverage_xml(root / "coverage.xml"),
             False,
             None,
             subproject=name,
+        )
+    if cfg.get("profile") != "python":  # as CI's lint job: a gates-only leg
+        legs["lint"] = fr.leg(
+            python,
+            "local",
+            "success",
+            "success",
+            fr.parse_junit(root / "no-junit.xml"),
+            None,
+            False,
+            None,
+            lint_only=True,
         )
     if reuse.tree_sha(root) != head or dirty("no"):
         raise PreconditionError("refusing to record: the tests changed the tree they ran on")
@@ -468,13 +488,17 @@ def _cmd_ci_select(args: Any) -> int:
 
 def _reuse_selection(root: Path, deselect: str) -> dict[str, Any]:
     """Keyword arguments for reuse.lookup/is_tested: the markers this run leaves out
-    (`--deselect` JSON), whether the repo has ci.select rules, and ci.accept-local-tested."""
+    (`--deselect` JSON), whether the repo has ci.select rules, ci.accept-local-tested, and
+    whether lint gates apply (a local record must then show them passing)."""
+    from . import gates
+
     want = json.loads(deselect) if deselect else []
     cfg = _config.load_or_defaults(root)  # no config file: defaults; a malformed one raises
     return {
         "want": want,
         "has_rules": bool(cfg.get("ci.select")),
         "accept_local": cfg.get("ci.accept-local-tested"),
+        "needs_gates": bool(gates.resolve(cfg, "test")),
     }
 
 

@@ -157,6 +157,8 @@ def ci_fragment(
     for lg in legs:
         if python.get(lg["python"]) != "failing":
             python[lg["python"]] = lg["status"]
+        if lg["runner"] == "local":  # a local run (`ci test --record`) is no build platform
+            continue
         os_name, arch = runner_platform(lg["runner"])
         slot = builds.setdefault(os_name, {})
         if slot.get(arch) != "failing":
