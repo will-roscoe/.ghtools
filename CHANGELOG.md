@@ -6,6 +6,12 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-11-01
+
+### Bug fixes
+
+- **ci**: a due component tests only itself, not every subproject
+
 ## [1.10.0] - 2026-11-01
 
 ### Features
