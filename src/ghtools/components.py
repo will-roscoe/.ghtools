@@ -350,6 +350,41 @@ def notes(cfg: Config, root: Path, name: str, version: str) -> str:
     return release_section(path.read_text(encoding="utf-8"), version)
 
 
+def decisions_from_rows(cfg: Config, rows: Any) -> list[ComponentDecision]:
+    """Rebuild decisions from the JSON list ``release components decide --github-output`` emits.
+
+    Nothing is decided again: the rows are taken as they are, so resume rows stay resumes.
+
+    :param cfg: the loaded config.
+    :param rows: the parsed ``components`` output, a list of row dicts (see
+        :meth:`ComponentDecision.as_dict`).
+    :returns: one decision per row, in order.
+    :raises ConfigError: when `rows` is malformed or names a component that is not released.
+    """
+    if not isinstance(rows, list):
+        raise ConfigError("decisions: expected a JSON list of component rows")
+    out = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+            raise ConfigError(f"decisions: bad row {row!r} (needs a component name)")
+        c = find(cfg, row["name"])
+        version, tag = row.get("version"), row.get("tag")
+        if not isinstance(version, str) or not isinstance(tag, str) or not version or not tag:
+            raise ConfigError(f"decisions: {c.name}: row needs a version and a tag")
+        out.append(
+            ComponentDecision(
+                c,
+                bool(row.get("release", True)),
+                version,
+                tag,
+                str(row.get("previous") or ""),
+                str(row.get("reason") or ""),
+                bool(row.get("resume", False)),
+            )
+        )
+    return out
+
+
 def commit_message(decisions: list[ComponentDecision]) -> str:
     """The release commit subject, e.g. ``chore(release): cdn 0.4.1, trainsearch 0.12.0 [skip ci]``.
 

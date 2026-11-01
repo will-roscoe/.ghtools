@@ -408,3 +408,62 @@ def test_missing_version_file_still_precondition_error(git_repo):
     assert d[0].release
     with pytest.raises(PreconditionError):
         components.prepare(cfg, git_repo.path, d)
+
+
+def _cli_repo(git_repo):
+    (git_repo.path / ".github").mkdir()
+    git_repo.commit(
+        "chore: init",
+        {
+            ".github/ghtools.toml": '[[subprojects]]\nname="cdn"\npath="src/cdn"\nrelease=true\n',
+            "src/cdn/pyproject.toml": _PYPROJECT,
+        },
+    )
+    git_repo.tag("cdn/0.4.0")
+    git_repo.commit("fix(cdn): x", {"src/cdn/a.txt": "1"})
+
+
+def _prepare_cli(git_repo, rows):
+    import json
+
+    argv = ["-C", str(git_repo.path), "release", "components", "prepare"]
+    return main([*argv, "--decisions", json.dumps(rows)])
+
+
+def test_prepare_decisions_never_writes_a_resume_row_and_does_not_decide(
+    git_repo, monkeypatch, capsys
+):
+    _cli_repo(git_repo)
+
+    def boom(*a, **k):
+        raise AssertionError("decide must not run")
+
+    monkeypatch.setattr(components, "decide", boom)
+    row = {"name": "cdn", "version": "0.4.1", "tag": "cdn/0.4.1", "previous": "cdn/0.4.0"}
+    assert _prepare_cli(git_repo, [{**row, "release": True, "resume": True}]) == 0
+    assert capsys.readouterr().out == ""
+    assert 'version = "0.4.0"' in (git_repo.path / "src/cdn/pyproject.toml").read_text()
+    assert _prepare_cli(git_repo, [{**row, "release": True, "resume": False}]) == 0
+    assert capsys.readouterr().out.split() == ["src/cdn/pyproject.toml"]
+    assert 'version = "0.4.1"' in (git_repo.path / "src/cdn/pyproject.toml").read_text()
+
+
+def test_prepare_decisions_validates_rows(git_repo, capsys):
+    _cli_repo(git_repo)
+    bad = [
+        (
+            [{"name": "nope", "version": "1.0.0", "tag": "nope/1.0.0"}],
+            "no released component 'nope'",
+        ),
+        ([{"name": "cdn"}], "needs a version"),
+        ([{"name": "cdn", "version": "0.3.0", "tag": "cdn/0.3.0"}], "lower than 0.4.0"),
+    ]
+    for rows, message in bad:
+        assert _prepare_cli(git_repo, rows) != 0
+        assert message in capsys.readouterr().err
+    assert 'version = "0.4.0"' in (git_repo.path / "src/cdn/pyproject.toml").read_text()
+
+
+def test_same_basename_apidoc_packages_are_rejected():
+    with pytest.raises(ConfigError, match="'cdn'.*same directory name"):
+        _cfg({**CDN, "apidoc": ["src/cdn/a/pkg", "src/cdn/b/pkg"]})

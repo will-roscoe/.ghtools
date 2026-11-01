@@ -440,6 +440,12 @@ def _check_subprojects(cfg: Config) -> None:
             raise ConfigError(f"subprojects[{i}].name: duplicate subproject {row['name']!r}")
         names.append(row["name"])
         _check_tag(f"subprojects[{i}].tag", row["tag"])
+        bases = [Path(a.rstrip("/")).name for a in row["apidoc"]]
+        if len(set(bases)) != len(bases):
+            raise ConfigError(
+                f"subprojects[{i}].apidoc: {row['name']!r} lists two packages with the same "
+                "directory name, which would share one api directory"
+            )
     for i, row in enumerate(rows):
         for need in row["needs"]:
             if need not in names:

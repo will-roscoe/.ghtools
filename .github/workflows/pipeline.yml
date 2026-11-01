@@ -727,13 +727,18 @@ jobs:
         # The root release pushed its commit to the branch after this run started; build on it
         # rather than on GITHUB_SHA so this job's push is a fast-forward.
         if: needs.release.outputs.released == 'true' && !inputs.dry-run
+        env:
+          ROOT_TAG: ${{ needs.release.outputs.tag }}
         run: |
           set -euo pipefail
           branch="$(ghtools config get branch)"
           git fetch --quiet origin "$branch"
-          # Only the root release commit itself (a child of the tested commit). If the branch moved
-          # on, stay put: the push below is then rejected and reported as "moved", as for `release`.
-          if [ "$(git rev-parse --verify -q 'FETCH_HEAD^' || true)" = "$GITHUB_SHA" ]; then
+          # Only the root release commit itself: a child of the tested commit whose subject is
+          # exactly what the `release` job commits. A user commit pushed since (the root made no
+          # commit, e.g. on a resume) never matches. Otherwise stay put: the push below is then
+          # rejected and reported as "moved", as for `release`.
+          if [ "$(git rev-parse --verify -q 'FETCH_HEAD^' || true)" = "$GITHUB_SHA" ] &&
+            [ "$(git log -1 --format=%s FETCH_HEAD)" = "chore(release): $ROOT_TAG [skip ci]" ]; then
             git merge --ff-only FETCH_HEAD
           fi
       - name: Decide
@@ -751,6 +756,7 @@ jobs:
         id: prepare
         if: steps.decide.outputs.released == 'true' && !inputs.dry-run
         env:
+          GH_TOKEN: ${{ github.token }}
           COMPONENTS: ${{ steps.decide.outputs.components }}
           MESSAGE: ${{ steps.decide.outputs.commit-message }}
         run: |
@@ -758,9 +764,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          # Nothing is committed or tagged between decide and prepare, so prepare (which decides
-          # again) writes exactly the versions decide exported. Resumed rows are left alone.
-          changed_out="$(ghtools release components prepare)"
+          # prepare writes exactly the rows decide exported (it decides nothing again), and never
+          # a resume row.
+          changed_out="$(ghtools release components prepare --decisions "$COMPONENTS")"
           if [ -n "$changed_out" ]; then
             mapfile -t changed <<<"$changed_out"
             git add -- "${changed[@]}"
@@ -784,8 +790,11 @@ jobs:
             exit 0
           fi
           branch="$(ghtools config get branch)"
-          if [ "$(git rev-parse HEAD)" != "$BASE" ]; then
-            if ! git push origin "HEAD:$branch"; then
+          # One atomic push: the release commit and its tags land together or not at all.
+          refs=()
+          if [ "$(git rev-parse HEAD)" != "$BASE" ]; then refs+=("HEAD:$branch"); fi
+          if ! git push --atomic origin "${refs[@]}" "${tags[@]}"; then
+            if [ "${#refs[@]}" -gt 0 ]; then
               git fetch --quiet origin "$branch"
               if [ "$(git rev-parse FETCH_HEAD)" != "$BASE" ]; then
                 # No rebase: commits pushed after this run started haven't passed this run's CI.
@@ -795,10 +804,9 @@ jobs:
                 exit 0
               fi
               echo "::error::Pushing the release commit to $branch was rejected. If a ruleset protects $branch, add GitHub Actions to its bypass list or set release.commit = false in .github/ghtools.toml."
-              exit 1
             fi
+            exit 1
           fi
-          git push --atomic origin "${tags[@]}"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
       - name: GitHub releases
         if: steps.decide.outputs.released == 'true' && !inputs.dry-run && steps.push.outputs.pushed == 'true'
@@ -809,7 +817,7 @@ jobs:
           set -euo pipefail
           # One row per line: name, version and tag from the exported decision, never re-derived.
           while IFS=$'\t' read -r name version tag; do
-            ghtools release components notes "$name" "$version" > "$RUNNER_TEMP/notes.md"
+            ghtools release components notes "$name" "$version" > "$RUNNER_TEMP/notes.md" </dev/null
             args=("$tag" --title "$name $version" --verify-tag)
             if [ -s "$RUNNER_TEMP/notes.md" ]; then
               args+=(--notes-file "$RUNNER_TEMP/notes.md")
@@ -817,7 +825,7 @@ jobs:
               args+=(--generate-notes)
             fi
             case "$version" in *-*) args+=(--prerelease) ;; esac
-            gh release create "${args[@]}"
+            gh release create "${args[@]}" </dev/null
           done < <(jq -r '.[] | [.name, .version, .tag] | @tsv' <<<"$COMPONENTS")
 
   # ---- Status card and badges, published to the status branch ----

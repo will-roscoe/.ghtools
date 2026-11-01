@@ -15,7 +15,7 @@ from typing import Any
 
 from . import config as _config
 from . import gitutil
-from .errors import GhtoolsError
+from .errors import ConfigError, GhtoolsError
 
 _REGISTRARS: list[Callable[[Any], None]] = []
 
@@ -198,7 +198,14 @@ def _cmd_release_components_prepare(args: Any) -> int:
 
     root = repo_dir(args)
     cfg = _config.load_or_defaults(root)
-    decisions = components.decide(cfg, root, _release_checker(root))
+    if args.decisions is not None:
+        try:
+            rows = json.loads(args.decisions)
+        except ValueError as exc:
+            raise ConfigError(f"--decisions: not valid JSON ({exc})") from exc
+        decisions = components.decisions_from_rows(cfg, rows)  # nothing is decided again
+    else:
+        decisions = components.decide(cfg, root, _release_checker(root))
     if args.only:
         decisions = [d for d in decisions if d.component.name in args.only]
     for path in components.prepare(cfg, root, decisions):
@@ -265,6 +272,11 @@ def _release_commands(sub: Any) -> None:
     cd.set_defaults(handler=_cmd_release_components_decide)
     cpp = cs.add_parser("prepare", help="write version files + changelogs; print changed paths")
     cpp.add_argument("--only", nargs="+", default=[], metavar="NAME", help="limit to these")
+    cpp.add_argument(
+        "--decisions",
+        metavar="JSON",
+        help="the `components` output of `decide --github-output`; written as given, no re-decide",
+    )
     cpp.set_defaults(handler=_cmd_release_components_prepare)
     cn = cs.add_parser("notes", help="print a component's changelog section for a version")
     cn.add_argument("name")

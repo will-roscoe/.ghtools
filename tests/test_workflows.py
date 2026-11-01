@@ -561,3 +561,26 @@ def test_race_handling_present():
     assert "steps.push.outputs.pushed == 'true'" in publish["if"]
     prep = _step("release-components", "Prepare the release commit and tags locally")["run"]
     assert "select(.resume | not)" in prep  # resumed rows are not re-tagged or re-committed
+
+
+def test_component_job_fast_forwards_only_onto_the_root_release_commit():
+    step = _step("release-components", "Continue from the root release commit")
+    assert step["env"] == {"ROOT_TAG": "${{ needs.release.outputs.tag }}"}
+    assert '"chore(release): $ROOT_TAG [skip ci]"' in step["run"]
+    assert "FETCH_HEAD^" in step["run"] and "$GITHUB_SHA" in step["run"]
+    # the subject must be what the root release job commits
+    assert (
+        'git commit -m "chore(release): $TAG [skip ci]"'
+        in _step("release", "Prepare the release commit and tag locally")["run"]
+    )
+
+
+def test_component_job_publishes_only_what_it_decided():
+    prep = _step("release-components", "Prepare the release commit and tags locally")
+    assert 'prepare --decisions "$COMPONENTS"' in prep["run"]
+    assert "GH_TOKEN" in prep["env"]
+    push = _step("release-components", "Push release commit and tags")["run"]
+    assert 'git push --atomic origin "${refs[@]}" "${tags[@]}"' in push
+    assert "git push origin" not in push
+    loop = _step("release-components", "GitHub releases")["run"]
+    assert loop.count("</dev/null") == 2
