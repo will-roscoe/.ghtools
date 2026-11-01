@@ -1,0 +1,161 @@
+{
+  "cards": [
+    {
+      "detail": "0 failed \u00b7 17 skipped",
+      "state": "pass",
+      "title": "TESTS",
+      "value": "\u2713 1031",
+      "x": 35,
+      "y": 201
+    },
+    {
+      "detail": "line coverage",
+      "state": "pass",
+      "title": "COVERAGE",
+      "value": "96.8%",
+      "x": 245,
+      "y": 201
+    },
+    {
+      "detail": "ruff",
+      "state": "pass",
+      "title": "LINT",
+      "value": "\u2713 Clean",
+      "x": 455,
+      "y": 201
+    },
+    {
+      "detail": "100% documented",
+      "state": "pass",
+      "title": "DOCS",
+      "value": "\u2713 Built",
+      "x": 665,
+      "y": 201
+    }
+  ],
+  "description_lines": [
+    "Sync a local directory tree with Proton Drive via the official Proton",
+    "Drive CLI, with conflict-aware push/pull and a local sync manifest."
+  ],
+  "height": 551,
+  "label_y": 183,
+  "links": [
+    {
+      "text": "PyPI",
+      "url": "https://pypi.org/project/protonfs/",
+      "x": 35
+    },
+    {
+      "text": "Documentation",
+      "url": "https://x.github.io/protonfs",
+      "x": 94
+    },
+    {
+      "text": "Repository",
+      "url": "https://github.com/x/protonfs",
+      "x": 232
+    }
+  ],
+  "links_y": 138,
+  "logo": "",
+  "name": "protonfs",
+  "panels": [
+    {
+      "items": [
+        {
+          "status": "passing",
+          "version": "3.9"
+        },
+        {
+          "status": "passing",
+          "version": "3.10"
+        },
+        {
+          "status": "passing",
+          "version": "3.11"
+        },
+        {
+          "status": "passing",
+          "version": "3.12"
+        },
+        {
+          "status": "passing",
+          "version": "3.13"
+        }
+      ],
+      "kind": "python",
+      "label": "PYTHON SUPPORT",
+      "width": 270,
+      "x": 35,
+      "y": 331
+    },
+    {
+      "archs": [
+        "arm64",
+        "x86_64"
+      ],
+      "kind": "builds",
+      "label": "BUILDS",
+      "oses": [
+        [
+          "Linux",
+          {
+            "arm64": "passing",
+            "x86_64": "passing"
+          }
+        ],
+        [
+          "macOS",
+          {
+            "arm64": "failing",
+            "x86_64": "passing"
+          }
+        ]
+      ],
+      "width": 190,
+      "x": 345,
+      "y": 331
+    },
+    {
+      "items": [
+        {
+          "name": "a",
+          "status": "passing"
+        },
+        {
+          "name": "b",
+          "status": "failing"
+        }
+      ],
+      "kind": "subprojects",
+      "label": "SUBPROJECTS",
+      "width": 160,
+      "x": 575,
+      "y": 331
+    },
+    {
+      "items": [
+        {
+          "dx": 0,
+          "label": "Pinned",
+          "value": "0.8.0"
+        },
+        {
+          "dx": 90,
+          "label": "Latest",
+          "value": "0.8.1"
+        }
+      ],
+      "kind": "extra",
+      "label": "PROTON DRIVE",
+      "state": "warn",
+      "width": 180,
+      "x": 35,
+      "y": 441
+    }
+  ],
+  "text_x": 35,
+  "updated": "",
+  "version": "2.3.0",
+  "width": 900
+}

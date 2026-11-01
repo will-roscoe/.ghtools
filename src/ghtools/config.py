@@ -117,6 +117,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
         "rows": Field(list, ["python", "builds"], _c("python", "builds", "extra")),
         "links": Field(list, ["pypi", "docs", "repo"], _c("pypi", "docs", "repo")),
         "logo": Field(str, ""),
+        # "components": a block per released component (name, version, tests, docs) replaces
+        # the quality cards; "single" is the card every repo had before components existed.
+        "layout": Field(str, "single", _c("single", "components")),
         "extra": Field(list, []),
         "badges": Field(
             list,

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from .. import components
 from ..config import Config
 from ..gitutil import latest_tag
 
@@ -236,7 +237,7 @@ def project_fragment(
         )
         released = proc.stdout.strip() if proc.returncode == 0 else ""
     publish = cfg.get("release.publish")
-    return {
+    fragment: dict[str, Any] = {
         "source": "project",
         "updated": _now(),
         "name": name,
@@ -251,6 +252,21 @@ def project_fragment(
             "repo": urls.get("repository") or urls.get("homepage") or "",
         },
     }
+    if cfg.get("status.layout") == "components":
+        fragment["components"] = _component_versions(cfg, root)
+    return fragment
+
+
+def _component_versions(cfg: Config, root: Path) -> list[dict[str, str]]:
+    """Each released component's name and current version (from its latest tag).
+
+    ``version`` is ``""`` for a component that has never been tagged.
+    """
+    out = []
+    for c in components.released(cfg):
+        tag = components.latest_tag(c, root)
+        out.append({"name": c.name, "version": components.tag_version(c, tag) if tag else ""})
+    return out
 
 
 def custom_fragment(
