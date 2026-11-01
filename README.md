@@ -84,7 +84,7 @@ uploads-per-day = 3
 
 `ci.skip-pr-heads` (default empty) lists head branches whose pull requests skip CI (tests, gates,
 docker and lint legs), for a release branch whose commits were already tested as pull requests
-into it. Other pull requests and all pushes are unaffected.
+into it. A repo that merges into `next` locally can get that record from `ghtools ci test --record` with `ci.accept-local-tested`. Other pull requests and all pushes are unaffected.
 
 ```toml
 [ci]
@@ -134,20 +134,19 @@ would release the root or a component, or a repo with no rules deselects nothing
 `ci.test` to be a single pytest command: `&&`, `||`, `;` or `|` in it is a config error. The
 `-m` is appended last, so it overrides an `addopts = -m ...` in the pytest config; with a deselection,
 pytest exit 5 (nothing collected) counts as a pass. A released component's pytest row is selected
-too; only a `test-command` row is exempt.
+too; only a `test-command` row is exempt. A repo that deselects markers itself (a conftest hook, or `addopts = -m`) must stop doing so for markers that have a rule, or the rule's tests are silently skipped while records claim a full run.
 
 The same selection goes to `ci skip-pr`, `ci reuse` and `ci record-tested`, so a record says what
 it ran. A repo with rules reuses only a record that made a claim and left out nothing the run
 wants: a full run, or one that deselected no more than this run does.
 
-`ghtools ci test --record` runs the lint gates and the tests locally (with the selection computed against `origin`,
-or `--base REV`) and records the clean tree as tested; `ci.accept-local-tested` lets reuse accept
-such a record, but only if its gates passed (a failing gate records nothing). It tests every subproject, so `--subproject` and `--deselect` are refused with it,
+`ghtools ci test --record` runs the lint gates and the tests locally (with the selection computed against the merge-base with `origin/<branch>`, or `--base REV`; a base equal to HEAD, as on the default branch itself, counts as unknown and runs everything) and records the clean tree as tested; `ci.accept-local-tested` lets reuse accept
+such a record (never on a push that releases, which needs one clean CI run), but only if its gates passed (a failing gate records nothing). It tests every subproject, so `--subproject` and `--deselect` are refused with it,
 and it never replaces a record made by CI. Gitignored files are not checked.
 
 ```toml
 [ci]
-select-full-on = ["push"]      # every push runs everything
+select-full-on = ["push"]      # every push deselects nothing (reuse can still skip it)
 accept-local-tested = true     # trust a local `ghtools ci test --record`
 
 [[ci.select]]

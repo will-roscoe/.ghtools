@@ -68,6 +68,9 @@ Coverage (`[ci.coverage]`: `package`, `floor`, `codecov`, `uploads-per-day`), `[
 - Set `ci.skip-pr-heads = ["next"]` so that PR skips CI. It skips only when the `next` tree already has a
   `refs/ghtools/tested/<tree>` record, which a passing PR run into `next` writes (so `ci.reuse-pr-results`
   is not required for this).
+  A repo that merges into `next` locally, without PRs, gets that record from `ghtools ci test --record`
+  with `ci.accept-local-tested = true`, so the `next` -> default PR is skipped. The releasing push then
+  always runs CI in full, because releasing pushes refuse local records (see Tested records).
 - Conventional commits decide the bump: `feat` is minor, `fix` and `perf` are patch, a `!` or
   `BREAKING CHANGE` is major (minor in 0.x with the default). `docs`, `test`, `chore` etc. release
   nothing. Use the types honestly, since the subjects become the changelog. Squash-merge bodies
@@ -130,9 +133,12 @@ loads. ghtools imposes no particular extension.
 - `ci.test` must be a single pytest command when rules exist; `&&`, `||`, `;` or `|` in it is a config
   error. Move a compound command into a script.
 - `ghtools ci test --record [--base REV]` runs the tests locally and records a clean tree as tested
-  (base defaults to `origin`). It refuses `--subproject` and `--deselect` (it tests every
+  (base defaults to the merge-base of HEAD with `origin/<branch>`; when that equals HEAD, e.g. on the
+  default branch itself, or cannot be found, the base is treated as unknown and every test runs, nothing
+  deselected). It refuses `--subproject` and `--deselect` (it tests every
   subproject), and never replaces a record CI made: it prints a notice and exits 0. To redo one, drop it
-  with `ghtools ci drop-tested`. Reuse accepts a local record only with `ci.accept-local-tested = true`.
+  with `ghtools ci drop-tested`. Reuse accepts a local record only with `ci.accept-local-tested = true`, and a releasing push (the
+  root would release, or a component is due) never does: `ci reuse --no-local` refuses local records.
 - A local record also runs the test-stage lint gates (`ci.gates`, `[[ci.gate]]`, as CI's lint job
   does, without installing their tools) and records the result in the legs like CI. A failing gate
   records nothing. Reuse accepts a local record only if its gates passed, whenever the repo has such
@@ -143,7 +149,7 @@ loads. ghtools imposes no particular extension.
 [ci]
 reuse-pr-results = true
 skip-pr-heads = ["next"]
-select-full-on = ["push"]      # every push runs everything
+select-full-on = ["push"]      # every push deselects nothing (reuse can still skip it)
 accept-local-tested = true
 
 [[ci.select]]
@@ -254,6 +260,10 @@ it locally and `ghtools status url` prints the README URL.
   `[directives] enabled = true`. Quote one in backticks to mention it without acting.
 - **`ci.test` with `ci.coverage.package`** must be pytest; the command ghtools runs adds the junit and
   coverage flags itself.
+- **Do not deselect markers yourself when a `[[ci.select]]` rule covers them.** A repo that deselects
+  a marker in a conftest hook, or with `addopts = -m ...` in its pytest config, must stop doing that
+  for every marker that has a rule. Otherwise the rule's tests are silently skipped and records claim
+  a full run that never ran them.
 - Hand-edited stubs drift: re-render with `ghtools stub --write` instead of editing.
 
 ## Changing ghtools itself
