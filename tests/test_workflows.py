@@ -629,12 +629,19 @@ def test_a_due_component_runs_ci_like_a_releasing_root(tmp_path):
     assert "run-ci=true" in out and "should-run" not in calls
 
 
-def test_matrix_covers_every_subproject_when_a_component_is_due(tmp_path):
+def test_matrix_adds_only_due_components(tmp_path):
     base = {"BASE": "a", "HEAD": "b", "FORCE_CI": ""}
     _, calls = _run_step(tmp_path, "matrix", {**base, "COMPONENTS": "[]"}, "true")
-    assert "--all" not in calls
+    assert "--all" not in calls and "--also" not in calls
     (tmp_path / "calls").unlink()
-    _, calls = _run_step(tmp_path, "matrix", {**base, "COMPONENTS": '[{"name":"a"}]'}, "true")
+    due = '[{"name":"a"},{"name":"b c"}]'
+    _, calls = _run_step(tmp_path, "matrix", {**base, "COMPONENTS": due}, "true")
+    assert "--all" not in calls and "--also a b c" in calls
+
+
+def test_forced_matrix_with_due_components_still_covers_all(tmp_path):
+    env = {"BASE": "a", "HEAD": "b", "FORCE_CI": "true", "COMPONENTS": '[{"name":"a"}]'}
+    _, calls = _run_step(tmp_path, "matrix", env, "true")
     assert "--all" in calls
 
 
