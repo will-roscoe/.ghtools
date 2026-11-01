@@ -199,3 +199,112 @@ def test_record_all_subprojects(tmp_path, monkeypatch):
 def test_base_without_record_is_refused(tmp_path):
     repo, _ = _record_repo(tmp_path, "")
     assert main(["-C", str(repo.path), "ci", "test", "--base", "HEAD"]) == 3
+
+
+def test_record_on_default_branch_runs_everything(tmp_path, monkeypatch):
+    rule = '[[ci.select]]\nmarker = "tui"\nchanged = ["tui/**"]\n'
+    repo, remote = _record_repo(tmp_path, rule, test_cmd="python -m pytest")
+    ran = _fake_bash(monkeypatch)
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0  # merge-base == HEAD
+    (ref,) = _tested_refs(remote)
+    assert _meta(remote, ref)["deselected"] == []
+    assert "not tui" not in ran[0]
+
+
+def test_explicit_base_head_is_kept(tmp_path, monkeypatch):
+    rule = '[[ci.select]]\nmarker = "tui"\nchanged = ["tui/**"]\n'
+    repo, remote = _record_repo(tmp_path, rule, test_cmd="python -m pytest")
+    _fake_bash(monkeypatch)
+    assert main(["-C", str(repo.path), "ci", "test", "--record", "--base", "HEAD"]) == 0
+    (ref,) = _tested_refs(remote)
+    assert _meta(remote, ref)["deselected"] == ["tui"]
+
+
+def test_record_refuses_subproject_and_deselect(tmp_path, capsys):
+    repo, remote = _record_repo(tmp_path, '[[subprojects]]\nname = "a"\npath = "a"\n')
+    cmd = ["-C", str(repo.path), "ci", "test", "--record"]
+    assert main([*cmd, "--subproject", "a"]) == 3
+    assert main([*cmd, "--deselect", '["x"]']) == 3
+    assert _tested_refs(remote) == []
+
+
+def _preseed(repo, tmp_path, meta):
+    """Put a record for HEAD's tree on origin: `meta` None means one with no meta.json."""
+    import json
+
+    from ghtools import reuse
+
+    legs = tmp_path / "seedlegs" / "x"
+    legs.mkdir(parents=True)
+    (legs / "status-leg.json").write_text(json.dumps({"status": "passing"}))
+    if meta is None:
+        reuse.record(repo.path, tmp_path / "seedlegs", meta={"source": "ci"})
+        # rewrite without meta.json: build the commit by hand
+        import subprocess
+
+        tree = reuse.tree_sha(repo.path)
+        blob = subprocess.run(
+            ["git", "hash-object", "-w", str(legs / "status-leg.json")],
+            cwd=repo.path, capture_output=True, text=True, check=True,
+        ).stdout.strip()  # fmt: skip
+        sub = subprocess.run(
+            ["git", "mktree"], cwd=repo.path, input=f"100644 blob {blob}\tx.json\n",
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()  # fmt: skip
+        top = subprocess.run(
+            ["git", "mktree"], cwd=repo.path, input=f"040000 tree {sub}\tlegs\n",
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()  # fmt: skip
+        env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@t", "PATH": __import__("os").environ["PATH"]}  # fmt: skip
+        commit = subprocess.run(
+            ["git", "commit-tree", top, "-m", "x"], cwd=repo.path, env=env,
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()  # fmt: skip
+        repo.run("push", "-q", "--force", "origin", f"{commit}:{reuse.ref_for(tree)}")
+    else:
+        reuse.record(repo.path, tmp_path / "seedlegs", meta=meta)
+
+
+def test_record_leaves_ci_record_alone(tmp_path, capsys):
+    for meta in ({"source": "ci", "deselected": []}, None):
+        sub = tmp_path / str(meta is None)
+        sub.mkdir()
+        repo, remote = _record_repo(sub, "")
+        _preseed(repo, sub, meta)
+        (before,) = _tested_refs(remote)
+        sha = __import__("subprocess").run(
+            ["git", "-C", str(remote), "rev-parse", before], capture_output=True, text=True
+        ).stdout  # fmt: skip
+        capsys.readouterr()
+        assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0
+        assert "already recorded by CI" in capsys.readouterr().out
+        after = __import__("subprocess").run(
+            ["git", "-C", str(remote), "rev-parse", before], capture_output=True, text=True
+        ).stdout  # fmt: skip
+        assert after == sha
+
+
+def test_record_replaces_local_record(tmp_path):
+    repo, remote = _record_repo(tmp_path, "")
+    _preseed(repo, tmp_path, {"source": "local", "deselected": ["old"]})
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0
+    (ref,) = _tested_refs(remote)
+    assert _meta(remote, ref)["deselected"] == []
+
+
+def test_record_round_trips_through_lookup(tmp_path, monkeypatch):
+    from ghtools import config, reuse
+    from ghtools.subprojects import matrix
+
+    toml = '[[subprojects]]\nname = "a"\npath = "a"\n[[subprojects]]\nname = "b"\npath = "b"\n'
+    repo, remote = _record_repo(tmp_path, toml)
+    _fake_bash(monkeypatch)
+    assert main(["-C", str(repo.path), "ci", "test", "--record"]) == 0
+    cfg = config.load(repo.path)
+    m, _ = matrix(cfg, repo.path, "", "HEAD", force=True)
+    assert {r.get("subproject") or "" for r in m["include"]} == {"", "a", "b"}
+    out = tmp_path / "out"
+    assert reuse.lookup(repo.path, out, m, accept_local=True) is True
+    assert len(list(out.glob("*.json"))) == 3
+    assert reuse.lookup(repo.path, tmp_path / "out2", m, accept_local=False) is False

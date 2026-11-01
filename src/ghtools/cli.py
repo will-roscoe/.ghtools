@@ -292,13 +292,25 @@ def _record_local_run(args: Any, root: Path) -> int:
     claims HEAD's tree passed) and a repo with no `origin`. Tests only what `--subproject` names, or
     else the root (profile python) and every in-tree subproject. The markers left out are
     :func:`ghtools.selection.deselected` against `--base` (default: merge-base with
-    ``origin/<branch>``; unknown means a full run); `--deselect` is ignored. Nothing is recorded
-    unless every leg passes and the tree is still untouched. Prints the ref. Raises
-    PreconditionError or CheckFailed.
+    ``origin/<branch>``; unknown, or equal to HEAD, means a full run). Nothing is recorded
+    unless every leg passes and the tree is still untouched, and an existing CI record for the
+    tree is left alone. Only tracked content is vouched for: gitignored files are not checked.
+    Prints the ref. Raises PreconditionError (also for `--subproject` or `--deselect`, which
+    would make a partial or contradictory claim) or CheckFailed.
     """
+    import tempfile
+
     from . import ci, reuse, selection
     from .errors import CheckFailed, PreconditionError
     from .status import fragments as fr
+
+    if args.subproject:
+        raise PreconditionError(
+            "--record tests every leg; it cannot be combined with --subproject "
+            "(one leg would replace the tree's full record)"
+        )
+    if args.deselect:
+        raise PreconditionError("--record computes the selection itself; drop --deselect")
 
     def dirty(untracked: str) -> str:
         return gitutil.git(
@@ -316,12 +328,12 @@ def _record_local_run(args: Any, root: Path) -> int:
         base = gitutil.git(
             "merge-base", "HEAD", f"origin/{cfg.get('branch')}", cwd=root, check=False
         ).strip()
+        # HEAD itself (e.g. on the default branch): an empty diff means "already on origin".
+        if base == gitutil.git("rev-parse", "HEAD", cwd=root).strip():
+            base = ""
     deselect = selection.deselected(cfg, gitutil.changed_files(base, root), "local")
-    if args.subproject:
-        names = [args.subproject]
-    else:
-        names = [""] if cfg.get("profile") == "python" else []
-        names += [row["name"] for row in _config.in_tree(cfg)]
+    names = [""] if cfg.get("profile") == "python" else []
+    names += [row["name"] for row in _config.in_tree(cfg)]
     if not names:
         raise PreconditionError("nothing to test: profile is not python and no in-tree subprojects")
     python = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -351,8 +363,9 @@ def _record_local_run(args: Any, root: Path) -> int:
         )
     if reuse.tree_sha(root) != head or dirty("no"):
         raise PreconditionError("refusing to record: the tests changed the tree they ran on")
-    import tempfile
-
+    if reuse.recorded_source(root) not in (None, "local"):
+        print(f"ghtools: tree already recorded by CI ({reuse.ref_for(head)}), not replacing it")
+        return 0
     with tempfile.TemporaryDirectory() as tmp:
         for key, leg in legs.items():
             d = Path(tmp) / f"ghtools-status-leg-{key}"

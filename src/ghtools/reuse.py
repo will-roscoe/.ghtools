@@ -93,6 +93,18 @@ def record(
     return ref
 
 
+def recorded_source(root: Path, remote: str = "origin") -> str | None:
+    """The `source` of the remote's record for HEAD's tree: None if unrecorded, "ci" also for a
+    record with no or unreadable meta, else the stored value."""
+    root = Path(root)
+    try:
+        _git_in(root, "fetch", "--quiet", "--no-tags", "--depth=1", remote, ref_for(tree_sha(root)))
+    except PreconditionError:
+        return None
+    meta = _read_meta(root)
+    return meta.get("source", "ci") if isinstance(meta, dict) else "ci"
+
+
 def covers_selection(meta: dict[str, Any] | None, want: Sequence[str], has_rules: bool) -> bool:
     """Did the recorded run leave out nothing beyond the markers `want` leaves out?
 
