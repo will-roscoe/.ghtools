@@ -6,7 +6,9 @@ defaults. A repo that sets no ``release = true`` gets an empty list and behaves 
 
 from __future__ import annotations
 
+import json
 import re
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -15,9 +17,9 @@ from typing import Any
 
 from .changelog import finalize_changelog, release_section
 from .config import Config
-from .errors import ConfigError, PreconditionError
+from .errors import ConfigError, GhtoolsError, PreconditionError
 from .gitutil import git, log_messages, log_subjects, since_range, tag_exists
-from .release import _made_by_ghtools
+from .release import made_by_ghtools
 from .version import compute_next_version, semver_sort_key
 from .versionfile import set_manifest_version, set_pyproject_version
 
@@ -178,7 +180,13 @@ def decide(
     needed subproject's path, and go through :func:`ghtools.version.compute_next_version` with
     ``version.zero-major-breaking``. A ``chore(release) ... [skip ci]`` commit is a ``chore``
     and never causes a bump. As for the root, with `has_release` a ghtools-made latest tag with
-    no GitHub release yet is resumed rather than skipped.
+    no GitHub release yet is resumed rather than skipped. Resume only fires for a newest tag
+    annotated exactly ``Release <tag>``, so lightweight tags (like backfilled ones) are never
+    resumed.
+
+    A computed version lower than the one in the component's readable version file (a component
+    with no tag starts from 0.0.0) is not released: the reason says to tag the current version
+    first. A missing or unreadable version file applies no such guard.
 
     :param cfg: the loaded config.
     :param root: the repository root.
@@ -196,7 +204,7 @@ def decide(
         if (
             current
             and has_release is not None
-            and _made_by_ghtools(current, root)
+            and made_by_ghtools(current, root)
             and not has_release(current)
         ):
             reason = f"resuming {current}: the tag exists but has no GitHub release"
@@ -214,6 +222,14 @@ def decide(
             out.append(ComponentDecision(c, False, "", "", previous, reason))
             continue
         tag = c.tag_for(nxt)
+        declared = _declared_version(c, root)
+        if declared and _lower(nxt, declared):
+            reason = (
+                f"computed {nxt} is lower than {declared} in {c.version_file}; "
+                f"tag {c.tag_for(declared)} first"
+            )
+            out.append(ComponentDecision(c, False, nxt, tag, previous, reason))
+            continue
         if tag_exists(tag, root):
             out.append(ComponentDecision(c, False, nxt, tag, previous, f"tag {tag} already exists"))
             continue
@@ -222,10 +238,38 @@ def decide(
     return out
 
 
+def _bad_file(c: Component) -> GhtoolsError:
+    return GhtoolsError(f"{c.name}: {c.version_file} is neither a .toml file nor a JSON manifest")
+
+
+def _lower(a: str, b: str) -> bool:
+    try:
+        return semver_sort_key(a) < semver_sort_key(b)
+    except ValueError:
+        return False
+
+
+def _declared_version(c: Component, root: Path) -> str | None:
+    """The version in `c`'s version file, None when missing, unreadable or without one."""
+    path = Path(root) / c.version_file
+    try:
+        raw = path.read_bytes().decode("utf-8")
+        if c.version_file.endswith(".toml"):
+            value = tomllib.loads(raw).get("project", {}).get("version")
+        else:
+            value = json.loads(raw).get("version")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, str) else None
+
+
 def _set_version(c: Component, raw: str, version: str) -> str:
     if c.version_file.endswith(".toml"):
         return set_pyproject_version(raw, version)
-    return set_manifest_version(raw, version)
+    try:
+        return set_manifest_version(raw, version)
+    except (ValueError, TypeError) as exc:  # not JSON, or a top level that is not an object
+        raise _bad_file(c) from exc
 
 
 def prepare(
@@ -246,7 +290,9 @@ def prepare(
     :param today: the date in the changelog heading; defaults to today (UTC).
     :returns: repo-relative paths changed, in order, without repeats.
     :raises ghtools.errors.PreconditionError: when a version file is missing.
-    :raises ghtools.errors.GhtoolsError: when a pyproject has no static version.
+    :raises ghtools.errors.GhtoolsError: when a pyproject has no static version, when a
+        non-``.toml`` version file is not a JSON object (``<name>: <file> is neither a .toml
+        file nor a JSON manifest``), or when a decision would lower the file's version.
     """
     if not cfg.get("release.commit"):
         return []
@@ -260,6 +306,12 @@ def prepare(
         vpath = root / c.version_file
         if not vpath.is_file():
             raise PreconditionError(f"{c.name}: version file {c.version_file} does not exist")
+        declared = _declared_version(c, root)
+        if declared and _lower(d.version, declared):
+            raise GhtoolsError(
+                f"{c.name}: {d.version} is lower than {declared} in {c.version_file}; "
+                f"tag {c.tag_for(declared)} first"
+            )
         pending[c.version_file] = _set_version(c, vpath.read_bytes().decode("utf-8"), d.version)
         cpath = root / c.changelog
         if cpath.is_file():

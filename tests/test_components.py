@@ -326,12 +326,14 @@ def test_changelog_section_only_own_commits(git_repo):
 
 
 def test_prepare_failure_leaves_tree_untouched(git_repo):
+    from ghtools.errors import GhtoolsError
+
     cfg = _prepared(git_repo)
     git_repo.commit("fix(cdn): thing", {"src/cdn/a.txt": "x"})
     git_repo.commit("fix(trainsearch): thing", {"src/trainsearch/b.txt": "x"})
     (git_repo.path / "src/trainsearch/manifest.json").write_text("not json")
     before = (git_repo.path / "src/cdn/pyproject.toml").read_text()
-    with pytest.raises(ValueError):
+    with pytest.raises(GhtoolsError):
         components.prepare(cfg, git_repo.path, components.decide(cfg, git_repo.path))
     assert (git_repo.path / "src/cdn/pyproject.toml").read_text() == before
     assert (git_repo.path / "src/cdn/CHANGELOG.md").read_text() == _LOG
@@ -359,3 +361,50 @@ def test_cli_components_decide_output(git_repo, tmp_path, monkeypatch):
     assert lines["released"] == "true"
     assert lines["commit-message"] == "chore(release): cdn 0.4.1 [skip ci]"
     assert json.loads(lines["components"])[0]["tag"] == "cdn/0.4.1"
+
+
+def test_non_json_version_file_is_a_clear_error(git_repo):
+    from ghtools.errors import GhtoolsError
+
+    cfg = _cfg({**CDN, "version-file": "src/cdn/VERSION"})
+    git_repo.commit("chore: init", {"src/cdn/VERSION": "0.0.0\n"})
+    git_repo.commit("feat(cdn): x", {"src/cdn/a.txt": "1"})
+    decisions = components.decide(cfg, git_repo.path)
+    with pytest.raises(
+        GhtoolsError, match="cdn: src/cdn/VERSION is neither a .toml file nor a JSON"
+    ):
+        components.prepare(cfg, git_repo.path, decisions)
+    git_repo.write("src/cdn/VERSION", "[1]")
+    with pytest.raises(GhtoolsError, match="neither a .toml"):
+        components.prepare(cfg, git_repo.path, decisions)
+
+
+def _untagged(git_repo, text):
+    cfg = _cfg(CDN)
+    files = {"src/cdn/pyproject.toml": text} if text is not None else {"src/cdn/a.txt": "a"}
+    git_repo.commit("chore: init", files)
+    git_repo.commit("feat(cdn): x", {"src/cdn/a.txt": "1"})
+    return cfg
+
+
+def test_no_downgrade_from_version_file(git_repo):
+    cfg = _untagged(git_repo, '[project]\nversion = "0.12.0"\n')
+    d = components.decide(cfg, git_repo.path)[0]
+    assert not d.release
+    assert "0.1.0" in d.reason and "0.12.0" in d.reason and "tag cdn/0.12.0 first" in d.reason
+
+
+@pytest.mark.parametrize("text", ['[project]\nversion = "0.0.0"\n', '[project]\nname = "x"\n'])
+def test_zero_or_absent_version_releases(git_repo, text):
+    cfg = _untagged(git_repo, text)
+    assert components.decide(cfg, git_repo.path)[0].version == "0.1.0"
+
+
+def test_missing_version_file_still_precondition_error(git_repo):
+    from ghtools.errors import PreconditionError
+
+    cfg = _untagged(git_repo, None)
+    d = components.decide(cfg, git_repo.path)
+    assert d[0].release
+    with pytest.raises(PreconditionError):
+        components.prepare(cfg, git_repo.path, d)
