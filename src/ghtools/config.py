@@ -105,6 +105,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
         # request against its base, a push since its old head) touches one; empty = every run.
         "paths": Field(list, []),
         "prebuild": Field(list, []),  # commands run before sphinx-build (e.g. generated sources)
+        # Rebuild and redeploy Pages from the release commit a run pushes (the docs-release jobs),
+        # so the site includes that release; off: only docs-deploy publishes, as before.
+        "after-release": Field(bool, False),
     },
     "status": {
         "enabled": Field(bool, False),
@@ -324,6 +327,11 @@ def _cross_checks(cfg: Config) -> None:
         raise ConfigError(
             "release.commit = false needs version.source = 'tag' or version.bump = 'require' "
             "(a written version must be committed)"
+        )
+    if cfg.get("docs.after-release") and not (cfg.get("docs.enabled") and cfg.get("docs.pages")):
+        raise ConfigError(
+            "docs.after-release needs docs.enabled = true and docs.pages = true "
+            "(it redeploys the Pages site from the release commit)"
         )
     words = cfg.get("ci.test").split()
     is_pytest = words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]
@@ -545,7 +553,11 @@ def export(cfg: Config) -> dict[str, Any]:
         "docker": cfg.get("ci.docker"),
         "reuse": cfg.get("ci.reuse-pr-results"),
         "select": bool(cfg.get("ci.select")),
-        "docs": {"enabled": cfg.get("docs.enabled"), "pages": cfg.get("docs.pages")},
+        "docs": {
+            "enabled": cfg.get("docs.enabled"),
+            "pages": cfg.get("docs.pages"),
+            "after_release": cfg.get("docs.after-release"),
+        },
         "status": {"enabled": cfg.get("status.enabled")},
         "subprojects": bool(in_tree(cfg)),
         "components": bool(released(cfg)),

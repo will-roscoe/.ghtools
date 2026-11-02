@@ -619,6 +619,8 @@ jobs:
       tag: ${{ steps.decide.outputs.tag }}
       version: ${{ steps.decide.outputs.version }}
       dist-artifact: ghtools-dist
+      # The release commit this job pushed to the branch; empty when it pushed none.
+      commit: ${{ steps.push.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -689,6 +691,8 @@ jobs:
               echo "::error::Pushing the release commit to $branch was rejected. If a ruleset protects $branch, add GitHub Actions to its bypass list or set release.commit = false in .github/ghtools.toml."
               exit 1
             fi
+            commit="$(git rev-parse HEAD)"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
           fi
           git push origin "refs/tags/$TAG"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
@@ -733,6 +737,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      # The components' release commit this job pushed to the branch (empty when it pushed none)
+      # and the subject decide gave it.
+      commit: ${{ steps.push.outputs.commit }}
+      commit-message: ${{ steps.decide.outputs.commit-message }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -826,6 +835,10 @@ jobs:
             fi
             exit 1
           fi
+          if [ "${#refs[@]}" -gt 0 ]; then
+            commit="$(git rev-parse HEAD)"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
       - name: GitHub releases
         if: steps.decide.outputs.released == 'true' && !inputs.dry-run && steps.push.outputs.pushed == 'true'
@@ -846,6 +859,161 @@ jobs:
             case "$version" in *-*) args+=(--prerelease) ;; esac
             gh release create "${args[@]}" </dev/null
           done < <(jq -r '.[] | [.name, .version, .tag] | @tsv' <<<"$COMPONENTS")
+
+  # ---- docs.after-release: the docs of the release commit this run pushed ----
+  # `docs` builds the pushed commit, before `release` and `release-components` commit the new
+  # versions and changelogs. With docs.after-release on, these two jobs rebuild the docs from that
+  # release commit and redeploy Pages after docs-deploy. Without the key both are skipped.
+  docs-release:
+    needs: [config, release, release-components]
+    if: >-
+      always() && needs.config.result == 'success' &&
+      needs.config.outputs.default-ref == 'true' &&
+      fromJSON(needs.config.outputs.config).docs.enabled &&
+      fromJSON(needs.config.outputs.config).docs.pages &&
+      fromJSON(needs.config.outputs.config).docs.after_release &&
+      !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      deploy: ${{ steps.recheck.outputs.deploy || 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: $/.github/actions/setup-ghtools
+      - name: Which commit to build?
+        id: target
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+          ROOT_RESULT: ${{ needs.release.result }}
+          COMPONENTS_RESULT: ${{ needs.release-components.result }}
+          ROOT_COMMIT: ${{ needs.release.outputs.commit }}
+          ROOT_TAG: ${{ needs.release.outputs.tag }}
+          COMPONENTS_COMMIT: ${{ needs.release-components.outputs.commit }}
+          COMPONENTS_MESSAGE: ${{ needs.release-components.outputs.commit-message }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice title=docs.after-release::dry run, so nothing was released and the docs are not rebuilt"
+            exit 0
+          fi
+          if [ "$ROOT_RESULT" = "failure" ] || [ "$COMPONENTS_RESULT" = "failure" ]; then
+            echo "::notice title=docs.after-release::a release job failed, so the docs are not rebuilt from its commit; the site keeps what docs-deploy published"
+            exit 0
+          fi
+          branch="$(ghtools config get branch)"
+          git fetch --quiet origin "$branch"
+          # Only the exact release commit(s) this run pushed, with the branch still at the newest:
+          # each one's parent is GITHUB_SHA or the root release commit, and its subject is the one
+          # the release job committed. Anything else prints a notice and leaves commit empty.
+          ghtools docs release-commit --base "$GITHUB_SHA" --head FETCH_HEAD \
+            --root-commit "$ROOT_COMMIT" --root-tag "$ROOT_TAG" \
+            --components-commit "$COMPONENTS_COMMIT" --components-message "$COMPONENTS_MESSAGE" \
+            --github-output
+      - name: Check out the release commit
+        id: checkout
+        if: steps.target.outputs.commit != ''
+        env:
+          COMMIT: ${{ steps.target.outputs.commit }}
+          RUN_DOCS: ${{ needs.config.outputs.run-docs }}
+        run: |
+          set -euo pipefail
+          git checkout --quiet --detach "$COMMIT"
+          # docs.paths: rebuild only if this push or the release commit touched the docs.
+          if [ "$RUN_DOCS" != "true" ]; then
+            changed="$(ghtools ci docs-changed --base "$GITHUB_SHA")"
+            if [ "$changed" != "true" ]; then
+              echo "::notice title=docs.after-release::neither this push nor the release commit touched docs.paths, so the docs are not rebuilt"
+              exit 0
+            fi
+          fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.checkout.outputs.build == 'true'
+        with:
+          python-version: "3.12"
+      - name: System packages
+        if: steps.checkout.outputs.build == 'true'
+        run: |
+          pkgs_out="$(ghtools config get docs.apt)"
+          if [ -n "$pkgs_out" ]; then
+            mapfile -t pkgs <<<"$pkgs_out"
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq "${pkgs[@]}"
+          fi
+      - name: Access to private git dependencies
+        if: steps.checkout.outputs.build == 'true'
+        env:
+          DEPS_TOKEN: ${{ secrets.DEPS_TOKEN }}
+        run: |
+          if [ -n "$DEPS_TOKEN" ]; then
+            git config --global url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"
+            git config --global --add url."https://x-access-token:${DEPS_TOKEN}@github.com/".insteadOf "git@github.com:"
+          fi
+      - name: Install
+        if: steps.checkout.outputs.build == 'true'
+        run: ghtools docs install
+      - name: Build
+        if: steps.checkout.outputs.build == 'true'
+        run: ghtools docs build
+      - name: Docs gates
+        if: steps.checkout.outputs.build == 'true'
+        run: |
+          ghtools gates install --stage docs
+          ghtools gates run --stage docs
+      - id: html
+        if: steps.checkout.outputs.build == 'true'
+        run: |
+          dir="$(ghtools docs html-dir)"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - name: Is the branch still at the release commit?
+        # A newer push's own run deploys docs that already include this release; never replace them.
+        id: recheck
+        if: steps.checkout.outputs.build == 'true'
+        env:
+          COMMIT: ${{ steps.target.outputs.commit }}
+        run: |
+          set -euo pipefail
+          branch="$(ghtools config get branch)"
+          git fetch --quiet origin "$branch"
+          head="$(git rev-parse FETCH_HEAD)"
+          if [ "$head" != "$COMMIT" ]; then
+            echo "::notice title=docs.after-release::$branch moved past the release commit during the build, so this build is not deployed; the newer run's docs include the release"
+            exit 0
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: steps.recheck.outputs.deploy == 'true'
+        with:
+          # docs uploads `github-pages` in the same run; artifact names must differ.
+          name: github-pages-release
+          path: ${{ steps.html.outputs.dir }}
+
+  docs-release-deploy:
+    # needs docs-deploy so the pre-release build is published first and this one replaces it;
+    # the shared `pages` group orders it against other runs' deploys.
+    needs: [config, docs-deploy, docs-release]
+    if: >-
+      always() && needs.docs-release.result == 'success' &&
+      needs.docs-release.outputs.deploy == 'true' &&
+      needs.config.outputs.default-ref == 'true' && !inputs.dry-run
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: github-pages-release
 
   # ---- Status card and badges, published to the status branch ----
   status:
