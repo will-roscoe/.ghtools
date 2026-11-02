@@ -679,3 +679,291 @@ def test_reuse_refuses_local_records_only_when_releasing(tmp_path, extra, flag):
     env = {"MATRIX": "{}", "DESELECT": "", "RUNNER_TEMP": str(tmp_path), **extra}
     _, calls = _run_step(tmp_path, "reuse", env, 'echo "false"')
     assert ("--no-local" in calls) is flag
+
+
+# --- docs.after-release: docs-release and docs-release-deploy ---------------------------------
+
+_EXISTING_JOBS = {
+    "config",
+    "test",
+    "tests-passed",
+    "record-tested",
+    "docker",
+    "hacs-test",
+    "hassfest",
+    "hacs",
+    "lint",
+    "docs",
+    "docs-deploy",
+    "release",
+    "release-components",
+    "status",
+}
+
+
+def test_docs_release_jobs_are_new_and_nothing_existing_waits_on_them():
+    jobs = _jobs()
+    assert set(jobs) == _EXISTING_JOBS | {"docs-release", "docs-release-deploy"}
+    for name in _EXISTING_JOBS:
+        needs = jobs[name].get("needs", [])
+        needs = [needs] if isinstance(needs, str) else needs
+        assert not {"docs-release", "docs-release-deploy"} & set(needs), name
+    # The jobs and deploy every repo already has are untouched.
+    assert jobs["docs"]["needs"] == jobs["release"]["needs"]
+    assert jobs["docs-deploy"]["needs"] == ["config", "docs"]
+    assert jobs["status"]["needs"] == [
+        *("config", "test", "tests-passed", "docker", "hacs-test", "hassfest", "hacs", "lint"),
+        *("docs", "docs-deploy", "release", "release-components"),
+    ]
+
+
+def test_docs_release_runs_only_with_the_key_after_both_release_jobs():
+    job = _jobs()["docs-release"]
+    assert job["needs"] == ["config", "release", "release-components"]
+    cond = job["if"]
+    for part in (
+        "always()",
+        "needs.config.result == 'success'",
+        "needs.config.outputs.default-ref == 'true'",
+        "fromJSON(needs.config.outputs.config).docs.enabled",
+        "fromJSON(needs.config.outputs.config).docs.pages",
+        "fromJSON(needs.config.outputs.config).docs.after_release",
+        "!contains(needs.*.result, 'cancelled')",
+    ):
+        assert part in cond, part
+    # The key the `if` reads is the one config export writes.
+    assert "after_release" in config.export(config.from_dict({}))["docs"]
+    assert job["permissions"] == {"contents": "read"}
+    assert job["outputs"]["deploy"] == "${{ steps.recheck.outputs.deploy || 'false' }}"
+
+
+def test_docs_release_builds_like_docs_only_from_the_checked_release_commit():
+    job = _jobs()["docs-release"]
+    names = [s.get("name") for s in job["steps"]]
+    order = ["Which commit to build?", "Check out the release commit", "Install", "Build"]
+    order += ["Docs gates", "Is the branch still at the release commit?"]
+    assert [names.index(n) for n in order] == sorted(names.index(n) for n in order)
+    for name in ("System packages", "Access to private git dependencies", "Install", "Build"):
+        assert _step("docs-release", name)["run"] == _step("docs", name)["run"], name
+    assert _step("docs-release", "Docs gates")["run"] == _step("docs", "Docs gates")["run"]
+    target = _step("docs-release", "Which commit to build?")
+    assert "ghtools docs release-commit" in target["run"]
+    assert '--base "$GITHUB_SHA" --head FETCH_HEAD' in target["run"]
+    assert target["env"]["ROOT_COMMIT"] == "${{ needs.release.outputs.commit }}"
+    assert target["env"]["ROOT_TAG"] == "${{ needs.release.outputs.tag }}"
+    assert target["env"]["COMPONENTS_COMMIT"] == "${{ needs.release-components.outputs.commit }}"
+    assert (
+        target["env"]["COMPONENTS_MESSAGE"]
+        == "${{ needs.release-components.outputs.commit-message }}"
+    )
+    # Every step after the decision runs only for a checked commit; values reach shell via env.
+    after = job["steps"][names.index("Check out the release commit") + 1 :]
+    for step in after:
+        assert step.get("if") in (
+            "steps.checkout.outputs.build == 'true'",
+            "steps.recheck.outputs.deploy == 'true'",
+        ), step
+    for step in job["steps"]:
+        assert "${{" not in step.get("run", ""), step.get("name")
+    upload = job["steps"][-1]
+    assert upload["uses"].startswith("actions/upload-pages-artifact@")
+    assert upload["if"] == "steps.recheck.outputs.deploy == 'true'"
+    assert upload["with"]["name"] == "github-pages-release"
+    docs_upload = next(
+        s for s in _jobs()["docs"]["steps"] if "upload-pages-artifact" in s.get("uses", "")
+    )
+    assert docs_upload["uses"] == upload["uses"]
+    assert "name" not in docs_upload.get("with", {})  # docs keeps the default `github-pages`
+
+
+def test_docs_release_deploy_shares_the_pages_group_after_docs_deploy():
+    jobs = _jobs()
+    job = jobs["docs-release-deploy"]
+    assert job["needs"] == ["config", "docs-deploy", "docs-release"]
+    for part in (
+        "always()",
+        "needs.docs-release.result == 'success'",
+        "needs.docs-release.outputs.deploy == 'true'",
+        "needs.config.outputs.default-ref == 'true'",
+        "!inputs.dry-run",
+    ):
+        assert part in job["if"], part
+    assert job["concurrency"] == jobs["docs-deploy"]["concurrency"]
+    assert job["concurrency"] == {"group": "pages", "cancel-in-progress": False}
+    assert job["permissions"] == jobs["docs-deploy"]["permissions"]
+    assert job["environment"] == jobs["docs-deploy"]["environment"]
+    (deploy,) = job["steps"]
+    assert deploy["uses"] == jobs["docs-deploy"]["steps"][0]["uses"]
+    assert deploy["with"] == {"artifact_name": "github-pages-release"}
+
+
+def test_release_jobs_report_the_commit_they_pushed():
+    jobs = _jobs()
+    assert jobs["release"]["outputs"]["commit"] == "${{ steps.push.outputs.commit }}"
+    comp = jobs["release-components"]["outputs"]
+    assert comp == {
+        "commit": "${{ steps.push.outputs.commit }}",
+        "commit-message": "${{ steps.decide.outputs.commit-message }}",
+    }
+    # Set only once the branch push succeeded: after the rejected-push handling.
+    for job, name in (
+        ("release", "Push release commit and tag"),
+        ("release-components", "Push release commit and tags"),
+    ):
+        run = _step(job, name)["run"]
+        assert run.index('echo "commit=$commit"') > run.index("::error::Pushing the release")
+
+
+def _job_step_script(tmp_path, job, name, env, stubs=None):
+    """Run one step of `job` with ghtools from this checkout; return the $GITHUB_OUTPUT text."""
+    import sys
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    tool = bindir / "ghtools"
+    tool.write_text(f'#!/bin/bash\nexec "{sys.executable}" -m ghtools "$@"\n')
+    tool.chmod(0o755)
+    for stub, body in (stubs or {}).items():
+        (bindir / stub).write_text(f"#!/bin/bash\n{body}\n")
+        (bindir / stub).chmod(0o755)
+    out = tmp_path / "out"
+    out.write_text("")
+    script = tmp_path / "step.sh"
+    script.write_text(_step(job, name)["run"])
+    full = {"PATH": f"{bindir}:/usr/bin:/bin", "GITHUB_OUTPUT": str(out), "HOME": str(tmp_path)}
+    # Actions sets every `env:` entry of the step, empty when its expression is.
+    full |= {key: "" for key in _step(job, name).get("env", {})}
+    full.update(env)
+    proc = subprocess.run(
+        ["bash", "-e", str(script)],
+        env=full,
+        cwd=env.get("CWD", tmp_path),
+        text=True,
+        capture_output=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return out.read_text(), proc.stdout
+
+
+def _origin_and_clone(tmp_path):
+    """A bare origin and a clone at the tested commit; return (clone, git, base sha)."""
+    origin, clone = tmp_path / "origin.git", tmp_path / "clone"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True, capture_output=True)
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=clone, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("config", "user.name", "T")
+    git("config", "user.email", "t@example.com")
+    git("config", "commit.gpgsign", "false")
+    git("checkout", "-q", "-b", "main")
+    (clone / ".github").mkdir()
+    (clone / ".github/ghtools.toml").write_text('branch = "main"\n')
+    git("add", "-A")
+    git("commit", "-q", "-m", "feat: tested work")
+    git("push", "-q", "origin", "main")
+    return clone, git, git("rev-parse", "HEAD")
+
+
+def _push_release(git, subject):
+    git("commit", "-q", "--allow-empty", "-m", subject)
+    git("push", "-q", "origin", "main")
+    return git("rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("which", ["root", "components", "both"])
+def test_target_step_picks_this_runs_release_commit(tmp_path, which):
+    clone, git, base = _origin_and_clone(tmp_path)
+    env = {"CWD": str(clone), "GITHUB_SHA": base, "DRY_RUN": "false"}
+    env |= {"ROOT_RESULT": "success", "COMPONENTS_RESULT": "success", "ROOT_TAG": "v1.2.0"}
+    if which in ("root", "both"):
+        env["ROOT_COMMIT"] = _push_release(git, "chore(release): v1.2.0 [skip ci]")
+    message = "chore(release): cdn 0.5.0 [skip ci]"
+    env["COMPONENTS_MESSAGE"] = message
+    if which in ("components", "both"):
+        env["COMPONENTS_COMMIT"] = _push_release(git, message)
+    head = git("rev-parse", "HEAD")
+    git("reset", "-q", "--hard", base)  # the job's checkout is at GITHUB_SHA
+    out, _ = _job_step_script(tmp_path, "docs-release", "Which commit to build?", env)
+    assert f"commit={head}\n" in out
+
+
+def test_target_step_skips_a_moved_branch_with_a_notice(tmp_path):
+    clone, git, base = _origin_and_clone(tmp_path)
+    root = _push_release(git, "chore(release): v1.2.0 [skip ci]")
+    _push_release(git, "fix: pushed after the run started")
+    git("reset", "-q", "--hard", base)
+    env = {"CWD": str(clone), "GITHUB_SHA": base, "DRY_RUN": "false", "GITHUB_ACTIONS": "true"}
+    env |= {"ROOT_COMMIT": root, "ROOT_TAG": "v1.2.0"}
+    out, stdout = _job_step_script(tmp_path, "docs-release", "Which commit to build?", env)
+    assert "commit=\n" in out
+    assert "::notice title=docs.after-release::" in stdout and "moved" in stdout
+
+
+@pytest.mark.parametrize(
+    ("extra", "said"),
+    [
+        ({"DRY_RUN": "true"}, "dry run"),
+        ({"ROOT_RESULT": "failure"}, "a release job failed"),
+        ({"COMPONENTS_RESULT": "failure"}, "a release job failed"),
+    ],
+)
+def test_target_step_does_nothing_on_a_dry_run_or_failed_release(tmp_path, extra, said):
+    env = {"DRY_RUN": "false", "ROOT_COMMIT": "abc", "ROOT_TAG": "v1.2.0", **extra}
+    # git and ghtools must not be needed: stub them to fail.
+    out, stdout = _job_step_script(
+        tmp_path,
+        "docs-release",
+        "Which commit to build?",
+        env,
+        {"git": "exit 9", "ghtools": "exit 9"},
+    )
+    assert "commit=" not in out
+    assert "::notice title=docs.after-release::" + said in stdout
+
+
+@pytest.mark.parametrize(
+    ("run_docs", "changed", "build"),
+    [
+        ("true", "false", True),
+        ("false", "true", True),
+        ("false", "false", False),
+    ],
+)
+def test_checkout_step_respects_docs_paths(tmp_path, run_docs, changed, build):
+    stubs = {
+        "git": 'echo "$@" >> "$HOME/git-calls"',
+        "ghtools": f'echo "$@" >> "$HOME/calls"; echo {changed}',
+    }
+    env = {"COMMIT": "abc", "RUN_DOCS": run_docs, "GITHUB_SHA": "base"}
+    out, stdout = _job_step_script(
+        tmp_path, "docs-release", "Check out the release commit", env, stubs
+    )
+    assert (tmp_path / "git-calls").read_text() == "checkout --quiet --detach abc\n"
+    assert ("build=true" in out) is build
+    if run_docs == "false":
+        assert "ci docs-changed --base base" in (tmp_path / "calls").read_text()
+    if not build:
+        assert "docs.paths" in stdout
+
+
+@pytest.mark.parametrize(("head", "deploy"), [("abc", True), ("newer", False)])
+def test_recheck_step_deploys_only_while_the_branch_is_at_the_release_commit(
+    tmp_path, head, deploy
+):
+    stubs = {
+        "git": f'[ "$1" = rev-parse ] && echo {head}; exit 0',
+        "ghtools": "echo main",
+    }
+    out, stdout = _job_step_script(
+        tmp_path,
+        "docs-release",
+        "Is the branch still at the release commit?",
+        {"COMMIT": "abc"},
+        stubs,
+    )
+    assert ("deploy=true" in out) is deploy
+    assert ("moved past the release commit" in stdout) is not deploy

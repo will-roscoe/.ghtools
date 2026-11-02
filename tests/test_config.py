@@ -103,7 +103,7 @@ def test_export_builds_matrix_with_extra_runners_on_newest_python():
         ]
     }
     assert out["release"]["pypi"] is False
-    assert out["docs"] == {"enabled": False, "pages": False}
+    assert out["docs"] == {"enabled": False, "pages": False, "after_release": False}
 
 
 def test_dump_toml_round_trips_with_comments():
@@ -360,3 +360,29 @@ def test_codecov_is_on_by_default_and_can_be_turned_off():
     assert config.from_dict({}).get("ci.coverage.codecov") is True
     off = config.from_dict({"ci": {"coverage": {"codecov": False}}})
     assert off.get("ci.coverage.codecov") is False
+
+
+def test_docs_after_release_is_off_by_default_and_exported():
+    assert config.from_dict({}).get("docs.after-release") is False
+    raw = {"docs": {"enabled": True, "pages": True, "after-release": True}}
+    cfg = config.from_dict(raw)
+    assert cfg.get("docs.after-release") is True
+    assert config.export(cfg)["docs"] == {"enabled": True, "pages": True, "after_release": True}
+
+
+@pytest.mark.parametrize(
+    "docs",
+    [
+        {"after-release": True},
+        {"after-release": True, "enabled": True},
+        {"after-release": True, "pages": True},
+    ],
+)
+def test_docs_after_release_needs_docs_and_pages(docs):
+    with pytest.raises(ConfigError, match=r"docs\.after-release needs docs\.enabled = true and"):
+        config.from_dict({"docs": docs})
+
+
+def test_docs_after_release_must_be_a_bool():
+    with pytest.raises(ConfigError, match=r"docs\.after-release"):
+        config.from_dict({"docs": {"enabled": True, "pages": True, "after-release": "yes"}})
