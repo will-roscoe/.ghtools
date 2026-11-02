@@ -6,6 +6,20 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-02
+
+### Features
+
+- **docs**: opt-in docs.after-release rebuilds Pages from the release commit
+
+### Documentation
+
+- document docs.after-release in AGENTS.md and the README
+
+### Tests
+
+- cover docs.after-release config, commit check and the docs-release jobs
+
 ## [1.10.1] - 2026-11-01
 
 ### Bug fixes
