@@ -760,6 +760,29 @@ def _cmd_docs_html_dir(args: Any) -> int:
     return 0
 
 
+def _cmd_docs_release_commit(args: Any) -> int:
+    from . import docs
+
+    pushed: list[tuple[str, str]] = []
+    if args.root_commit:
+        if not args.root_tag:
+            raise GhtoolsError("--root-commit needs --root-tag")
+        pushed.append((args.root_commit, f"chore(release): {args.root_tag} [skip ci]"))
+    if args.components_commit:
+        if not args.components_message:
+            raise GhtoolsError("--components-commit needs --components-message")
+        pushed.append((args.components_commit, args.components_message))
+    commit, reason = docs.release_commit(repo_dir(args), args.base, args.head, pushed)
+    if args.github_output:
+        write_github_output({"commit": commit or "", "reason": reason})
+        annotate = not commit and os.environ.get("GITHUB_ACTIONS") == "true"
+        print(f"::notice title=docs.after-release::{reason}" if annotate else reason)
+    else:
+        print(commit or "")
+        print(reason, file=sys.stderr)
+    return 0
+
+
 @registrar
 def _docs_commands(sub: Any) -> None:
     p = sub.add_parser("docs", help="Sphinx docs steps")
@@ -767,6 +790,19 @@ def _docs_commands(sub: Any) -> None:
     ds.add_parser("install").set_defaults(handler=_cmd_docs_install)
     ds.add_parser("build").set_defaults(handler=_cmd_docs_build)
     ds.add_parser("html-dir").set_defaults(handler=_cmd_docs_html_dir)
+    rc = ds.add_parser(
+        "release-commit",
+        help="the release commit this run pushed, if the branch is exactly at it "
+        "(docs.after-release); prints its sha, or nothing, and the reason on stderr",
+    )
+    rc.add_argument("--base", required=True, help="the tested commit (GITHUB_SHA)")
+    rc.add_argument("--head", required=True, help="the branch head as fetched (FETCH_HEAD)")
+    rc.add_argument("--root-commit", default="", help="the root release commit pushed, if any")
+    rc.add_argument("--root-tag", default="", help="the root release's tag")
+    rc.add_argument("--components-commit", default="", help="the components' commit, if any")
+    rc.add_argument("--components-message", default="", help="that commit's expected subject")
+    rc.add_argument("--github-output", action="store_true", help="write commit= and reason=")
+    rc.set_defaults(handler=_cmd_docs_release_commit)
 
 
 def _cmd_init(args: Any) -> int:
