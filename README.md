@@ -106,6 +106,25 @@ run, which has no base and always builds). Include the sources the docs import, 
 paths = ["doc/**", "src/**.py", "pyproject.toml"]
 ```
 
+## Publishing the docs of a release
+
+The docs job builds the pushed commit, before the release jobs commit the new version and
+changelog (`chore(release): ... [skip ci]`), so the site deployed on a releasing push shows the
+previous release. `docs.after-release` (default false; needs `docs.enabled` and `docs.pages`) adds
+two jobs: `docs-release` rebuilds the docs from that release commit, and `docs-release-deploy`
+publishes them after `docs-deploy`, in the same `pages` concurrency group. They build only the
+release commit this run pushed (root, components, or both), and only while the branch is still at
+it. A dry run, a run that released nothing, a failed release job or a branch that moved builds
+nothing and says why in a notice. With `docs.paths` set, the docs are rebuilt only if the push or
+the release commit touched those paths.
+
+```toml
+[docs]
+enabled = true
+pages = true
+after-release = true
+```
+
 ## Reusing pull request test results
 
 `ci.reuse-pr-results` (default false) lets the push that merges a pull request skip CI when the
