@@ -1,0 +1,46 @@
+{
+  "builds": {
+    "Linux": {
+      "x86_64": "passing"
+    }
+  },
+  "coverage": 93.0,
+  "docstrings": null,
+  "lint": {
+    "gates": [
+      "ruff",
+      "ruff-format",
+      "actionlint",
+      "codecov-sync"
+    ],
+    "status": "passing"
+  },
+  "python": [
+    {
+      "status": "passing",
+      "version": "3.11"
+    },
+    {
+      "status": "passing",
+      "version": "3.12"
+    },
+    {
+      "status": "passing",
+      "version": "3.13"
+    }
+  ],
+  "run": {
+    "commit": "171de2245120a2f35c60145c0326d7c13450a8a5",
+    "id": "41451395095",
+    "url": "https://github.com/will-roscoe/.ghtools/actions/runs/41451395095"
+  },
+  "source": "ci",
+  "tests": {
+    "duration_s": 38.07,
+    "failed": 0,
+    "passed": 719,
+    "skipped": 0,
+    "total": 719
+  },
+  "updated": "2026-11-02T13:17:54Z"
+}
