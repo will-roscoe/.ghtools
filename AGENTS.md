@@ -53,6 +53,7 @@ Unset keys take the default. Unknown keys are an error that lists the allowed on
 | `docs.enabled`, `docs.pages` | `false`, `false` | build Sphinx docs; deploy them to Pages |
 | `docs.dir`, `docs.install` | `"docs"`, `".[docs]"` | Sphinx source dir (needs `conf.py`), pip install |
 | `docs.apidoc`, `docs.prebuild`, `docs.apt`, `docs.strict`, `docs.paths` | `""`, `[]`, `[]`, `true`, `[]` | see Docs |
+| `docs.after-release` | `false` | rebuild and redeploy Pages from the release commit a run pushes; needs `docs.enabled` and `docs.pages` (see Docs) |
 | `status.enabled` | `false` | publish the status card |
 | `status.branch` | `"ghtools-status"` | branch the card is published to; must not be the default branch |
 | `status.layout` | `"single"` | `"components"` for the per-component card |
@@ -98,6 +99,18 @@ loads. ghtools imposes no particular extension.
 - **`docs.paths`** (default empty, docs build every run): path globs; when set, the docs job runs only
   if the change touches one of them, ghtools's own settings or the stub. A skipped docs job counts
   as passing and the published site stays as it was. List the sources that autodoc imports.
+- **`docs.after-release`** (default `false`; needs `docs.enabled` and `docs.pages`): `docs` builds the
+  pushed commit, so on a push that releases, the site `docs-deploy` publishes lacks the new version
+  and changelog section, which the `[skip ci]` release commit adds. With the key on, `docs-release`
+  (after `release` and `release-components`) builds the docs again from the release commit, and
+  `docs-release-deploy` publishes it after `docs-deploy`, in the same `pages` concurrency group.
+  It builds only the exact commit(s) this run pushed, with the branch still at the newest: the
+  root's `chore(release): <tag> [skip ci]` on `GITHUB_SHA`, the components' commit on that or on
+  `GITHUB_SHA`, each with the subject its job committed (`ghtools docs release-commit` checks this),
+  and it checks the branch again before uploading. A dry run, a run that pushed no release commit,
+  a failed release job, a branch that moved, or (with `docs.paths`) neither the push nor the
+  release commit touching the docs builds nothing and says why in a notice; the site keeps the
+  `docs-deploy` build. Without the key both jobs are skipped and nothing else changes.
 - **`docs.prebuild`**: shell commands run (bash, `pipefail`) before the Sphinx build, e.g. to generate
   sources. `docs.apt` lists apt packages installed first.
 - **`docs.apidoc`**: a package path; `sphinx-apidoc` writes it to `<docs.dir>/api/<package name>/`
