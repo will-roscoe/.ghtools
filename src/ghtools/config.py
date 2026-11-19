@@ -47,7 +47,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
     },
     "release": {
         "enabled": Field(bool, True),
-        "publish": Field(list, ["github"], _c("github", "github-zip", "pypi")),
+        "publish": Field(list, ["github"], _c("github", "github-zip", "pypi", "ghcr")),
+        # buildx platforms the "ghcr" image is built for
+        "platforms": Field(list, ["linux/amd64"], _c("linux/amd64", "linux/arm64", "linux/arm/v7")),
         "zip": Field(str, ""),
         "commit": Field(bool, True),
         "changelog": Field(str, "CHANGELOG.md"),
@@ -60,6 +62,10 @@ SCHEMA: dict[str, dict[str, Field]] = {
         # Editable, so tests import the source tree and --cov=<path> collects data.
         "install": Field(str, "-e .[dev]"),
         "test": Field(str, "pytest -q"),
+        # pytest-xdist workers: "auto" or a number; empty runs the tests serially. With it set,
+        # the tests must be parallel-safe (no shared temp paths or global state between tests).
+        "workers": Field(str, ""),
+        "dist": Field(str, "", _c("", "load", "loadfile", "loadscope", "worksteal")),
         "paths": Field(list, ["**.py", "pyproject.toml"]),
         # Pull requests whose head branch is listed skip CI (tests, gates, docker, lint legs);
         # their commits were tested as pull requests into that branch (checked: the head tree
@@ -337,6 +343,13 @@ def _cross_checks(cfg: Config) -> None:
     is_pytest = words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]
     if cfg.get("ci.coverage.package") and not is_pytest:
         raise ConfigError("ci.coverage.package needs ci.test to run pytest")
+    workers = cfg.get("ci.workers")
+    if workers and not (workers == "auto" or (workers.isdigit() and int(workers) > 0)):
+        raise ConfigError(f"ci.workers: expected 'auto' or a positive number, got {workers!r}")
+    if workers and not is_pytest:
+        raise ConfigError("ci.workers needs ci.test to run pytest")
+    if cfg.get("ci.dist") and not workers:
+        raise ConfigError("ci.dist needs ci.workers")
     if cfg.get("status.branch") == cfg.get("branch"):
         raise ConfigError(
             "status.branch: must not be the default branch (publishing replaces the whole branch)"
@@ -495,6 +508,8 @@ def check_paths(cfg: Config, root: Path) -> None:
     zip_dir = cfg.get("release.zip")
     if "github-zip" in cfg.get("release.publish") and not (root / zip_dir).is_dir():
         raise ConfigError(f"release.zip: {zip_dir} is not a directory")
+    if "ghcr" in cfg.get("release.publish") and not (root / "Dockerfile").is_file():
+        raise ConfigError("release.publish: 'ghcr' needs a Dockerfile at the repository root")
     if cfg.get("docs.enabled") and not (root / cfg.get("docs.dir") / "conf.py").is_file():
         raise ConfigError(f"docs.dir: {cfg.get('docs.dir')}/conf.py does not exist")
     logo = cfg.get("status.logo")

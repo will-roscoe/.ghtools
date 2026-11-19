@@ -636,11 +636,6 @@ jobs:
           # Lets `decide` resume a ghtools tag that an earlier run pushed but never released.
           GH_TOKEN: ${{ github.token }}
         run: ghtools release decide --github-output
-      - name: Dry-run summary
-        if: inputs.dry-run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ghtools release decide --summary >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare the release commit and tag locally
         if: steps.decide.outputs.released == 'true' && steps.decide.outputs.resume != 'true' && !inputs.dry-run
         env:

@@ -16,7 +16,7 @@ from typing import Any
 
 from . import archive, codecov
 from .ci import STUB_PATH
-from .config import CONFIG_PATH, dump_toml, from_dict, load
+from .config import CONFIG_PATH, Config, dump_toml, from_dict, load
 from .detect import Detection, detect
 from .errors import PreconditionError
 from .gitutil import dirty_paths, git, is_work_tree_root, tag_exists
@@ -94,12 +94,22 @@ def gates_from_replaced(texts: list[str], prebuild: list[str]) -> list[dict[str,
     return list(gates.values())
 
 
+def ghcr_stub_args(cfg: Config) -> dict[str, Any]:
+    """Return render_stub's ``ghcr`` and ``platforms`` keywords for these settings."""
+    return {
+        "ghcr": "ghcr" in cfg.get("release.publish"),
+        "platforms": ",".join(cfg.get("release.platforms")),
+    }
+
+
 def render_stub(
     branch: str,
     pypi: bool,
     ref: str = STUB_REF,
     dispatch: bool = False,
     private_deps: bool = False,
+    ghcr: bool = False,
+    platforms: str = "linux/amd64",
 ) -> str:
     return render(
         "stub.yml.j2",
@@ -108,6 +118,8 @@ def render_stub(
         ref=ref,
         dispatch=dispatch,
         private_deps=private_deps,
+        ghcr=ghcr,
+        platforms=platforms,
         stub_version=STUB_VERSION,  # read at call time, so the marker always follows the constant
     )
 
@@ -190,6 +202,7 @@ def current_stub(root: Path) -> str:
         pin.group(1) if pin else STUB_REF,
         dispatch=bool(cfg.get("directives.dispatch")),
         private_deps=cfg.get("ci.private-deps"),
+        **ghcr_stub_args(cfg),
     )
 
 
@@ -349,6 +362,7 @@ def make_plan(
         ref,
         dispatch=bool(cfg.get("directives.dispatch")),
         private_deps=cfg.get("ci.private-deps"),
+        **ghcr_stub_args(cfg),
     )
     if cfg.get("ci.coverage.codecov"):
         others = codecov.other_configs(root)

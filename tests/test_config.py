@@ -44,6 +44,10 @@ def test_values_override_defaults():
         ({"ci": {"coverage": {"floor": True}}}, "ci.coverage.floor: expected an integer"),
         ({"ci": {"python": "3.12"}}, "ci.python: expected a list of strings"),
         ({"release": {"publish": ["npm"]}}, "release.publish: 'npm' is not one of"),
+        (
+            {"release": {"platforms": ["linux/s390x"]}},
+            "release.platforms: 'linux/s390x' is not one of",
+        ),
         ({"ci": {"gates": ["pylint"]}}, "ci.gates: unknown gate 'pylint'"),
         ({"version": {"source": "manifest"}}, "version.manifest: required when"),
         ({"release": {"publish": ["github-zip"]}}, "release.zip: required when"),
@@ -386,3 +390,15 @@ def test_docs_after_release_needs_docs_and_pages(docs):
 def test_docs_after_release_must_be_a_bool():
     with pytest.raises(ConfigError, match=r"docs\.after-release"):
         config.from_dict({"docs": {"enabled": True, "pages": True, "after-release": "yes"}})
+
+
+def test_ghcr_publish_and_platforms_validate(tmp_path):
+    cfg = config.from_dict(
+        {"release": {"publish": ["github", "ghcr"], "platforms": ["linux/amd64", "linux/arm64"]}}
+    )
+    assert cfg.get("release.platforms") == ["linux/amd64", "linux/arm64"]
+    assert config.from_dict({}).get("release.platforms") == ["linux/amd64"]
+    with pytest.raises(ConfigError, match=r"release\.publish: 'ghcr' needs a Dockerfile"):
+        config.check_paths(cfg, tmp_path)
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    config.check_paths(cfg, tmp_path)

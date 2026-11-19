@@ -38,12 +38,14 @@ Unset keys take the default. Unknown keys are an error that lists the allowed on
 | `version.bump` | `"write"` | `write` commits the new version into the file; `require` demands it already be there |
 | `version.zero-major-breaking` | `"minor"` | in 0.x a breaking change bumps `minor` or `major` |
 | `release.enabled` | `true` | release at all |
-| `release.publish` | `["github"]` | any of `github`, `github-zip` (needs `release.zip`), `pypi` |
+| `release.publish` | `["github"]` | any of `github`, `github-zip` (needs `release.zip`), `pypi`, `ghcr` (needs a root `Dockerfile`) |
+| `release.platforms` | `["linux/amd64"]` | buildx platforms of the `ghcr` image: `linux/amd64`, `linux/arm64`, `linux/arm/v7` |
 | `release.commit` | `true` | write a `chore(release): <tag> [skip ci]` commit; `false` needs `version.source = "tag"` or `bump = "require"` |
 | `release.changelog` | `"CHANGELOG.md"` | changelog finalised at release |
 | `release.root` | `true` | `false` stops the repo releasing as `v{x}`; only released components release |
 | `ci.python`, `ci.runners` | `["3.12"]`, `["ubuntu-latest"]` | test matrix; a leg with no python build for its runner moves to an OS version that has one or is dropped with a warning |
 | `ci.install`, `ci.test` | `"-e .[dev]"`, `"pytest -q"` | install and test commands |
+| `ci.workers`, `ci.dist` | `""`, `""` | run pytest in parallel with pytest-xdist: `"auto"` or a number of workers, and optionally `load`, `loadfile`, `loadscope` or `worksteal`; needs a pytest `ci.test`, and tests that are parallel-safe |
 | `ci.paths` | `["**.py", "pyproject.toml"]` | a push touching none of these skips CI |
 | `ci.skip-pr-heads` | `[]` | head branches whose PRs skip CI (see release flow) |
 | `ci.reuse-pr-results` | `false` | skip CI on the push that merges a PR whose tree already passed |
@@ -267,6 +269,12 @@ it locally and `ghtools status url` prints the README URL.
 - **Secrets** `doctor` checks: `CODECOV_TOKEN` when `ci.coverage.codecov` is on (default; uploads are
   skipped without it), `DEPS_TOKEN` when `ci.private-deps` is on. For `pypi`, the trusted publisher
   must name workflow `ghtools.yml` and environment `pypi`; `doctor` cannot check it.
+- **`ghcr`** adds a `publish-ghcr` job to the stub (re-render with `ghtools stub --write`). After a
+  release it builds the root `Dockerfile` at the tag and pushes `ghcr.io/<owner>/<repo>` tagged
+  `X.Y.Z`, `X.Y` and, unless the version is a prerelease, `latest`. Only that job gets
+  `packages: write`. It passes `GIT_DESCRIBE=<tag>` and `BUILD_DATE` as build args, for a Dockerfile
+  that declares them. A package first published from a private repository may start private: set its
+  visibility in the package's settings. A failed publish can be re-run on its own from the run page.
 - **Codecov quota:** a run uploads from one leg, only when code under `ci.paths` changed, at most
   `ci.coverage.uploads-per-day` (default 1) per day, per subproject.
 - **`[skip ci]`** in a commit message skips the pipeline; ghtools adds it to its release commits. CI directives (`[ci]`, `[test]`, `[lint]`, ...) are off unless

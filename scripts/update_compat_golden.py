@@ -138,6 +138,7 @@ def capture(toml_path: Path, tmp: Path) -> dict[str, Any]:
         "pypi" in cfg.get("release.publish"),
         dispatch=bool(cfg.get("directives.dispatch")),
         private_deps=cfg.get("ci.private-deps"),
+        **scaffold.ghcr_stub_args(cfg),
     )
     out["test_command"] = {"": _try(root, lambda: ci.test_command(cfg))}
     out["install_command"] = {"": _try(root, lambda: norm(ci.install_command(cfg)))}

@@ -166,6 +166,13 @@ def _cmd_release_decide(args: Any) -> int:
     decision = release.decide(_config.load_or_defaults(root), root, _release_checker(root))
     if args.github_output:
         write_github_output(decision.as_outputs())
+        # A run that writes outputs still says why it did or did not release: the
+        # reason in the job log, the summary on the run's page.
+        print(decision.reason)
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            with open(summary_path, "a", encoding="utf-8") as fh:
+                fh.write(decision.summary() + "\n")
     if args.summary:
         print(decision.summary())
     elif not args.github_output:
@@ -256,7 +263,12 @@ def _release_commands(sub: Any) -> None:
     p = sub.add_parser("release", help="release steps used by the pipeline's release job")
     rs = p.add_subparsers(dest="release_cmd", required=True, metavar="<subcommand>")
     d = rs.add_parser("decide", help="decide whether and what to release")
-    d.add_argument("--github-output", action="store_true", help="write outputs to $GITHUB_OUTPUT")
+    d.add_argument(
+        "--github-output",
+        action="store_true",
+        help="write outputs to $GITHUB_OUTPUT; also print the reason, and add the summary "
+        "to $GITHUB_STEP_SUMMARY when set",
+    )
     d.add_argument("--summary", action="store_true", help="print a markdown summary")
     d.set_defaults(handler=_cmd_release_decide)
     pr = rs.add_parser("prepare", help="write version file + changelog; print changed paths")
