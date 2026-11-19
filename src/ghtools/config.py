@@ -62,6 +62,10 @@ SCHEMA: dict[str, dict[str, Field]] = {
         # Editable, so tests import the source tree and --cov=<path> collects data.
         "install": Field(str, "-e .[dev]"),
         "test": Field(str, "pytest -q"),
+        # pytest-xdist workers: "auto" or a number; empty runs the tests serially. With it set,
+        # the tests must be parallel-safe (no shared temp paths or global state between tests).
+        "workers": Field(str, ""),
+        "dist": Field(str, "", _c("", "load", "loadfile", "loadscope", "worksteal")),
         "paths": Field(list, ["**.py", "pyproject.toml"]),
         # Pull requests whose head branch is listed skip CI (tests, gates, docker, lint legs);
         # their commits were tested as pull requests into that branch (checked: the head tree
@@ -339,6 +343,13 @@ def _cross_checks(cfg: Config) -> None:
     is_pytest = words[:1] == ["pytest"] or words[:3] == ["python", "-m", "pytest"]
     if cfg.get("ci.coverage.package") and not is_pytest:
         raise ConfigError("ci.coverage.package needs ci.test to run pytest")
+    workers = cfg.get("ci.workers")
+    if workers and not (workers == "auto" or (workers.isdigit() and int(workers) > 0)):
+        raise ConfigError(f"ci.workers: expected 'auto' or a positive number, got {workers!r}")
+    if workers and not is_pytest:
+        raise ConfigError("ci.workers needs ci.test to run pytest")
+    if cfg.get("ci.dist") and not workers:
+        raise ConfigError("ci.dist needs ci.workers")
     if cfg.get("status.branch") == cfg.get("branch"):
         raise ConfigError(
             "status.branch: must not be the default branch (publishing replaces the whole branch)"

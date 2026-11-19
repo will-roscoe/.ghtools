@@ -42,7 +42,8 @@ def install_command(cfg: Config, subproject: str | None = None) -> list[str]:
 
     For a subproject, its needed siblings install first (each from ``install``, else
     ``-e ./<path>``), then pytest and pytest-cov. A row with ``test-command`` set and an empty
-    ``install`` contributes nothing, since its command brings its own environment.
+    ``install`` contributes nothing, since its command brings its own environment. With
+    ``ci.workers`` set, pytest-xdist is added to the root's and every subproject's install.
 
     :param cfg: the loaded config.
     :param subproject: a ``[[subprojects]]`` name, or None for the root's ``ci.install``.
@@ -70,8 +71,22 @@ def install_command(cfg: Config, subproject: str | None = None) -> list[str]:
         if not entries:
             return []
         words = [w for e in entries for w in shlex.split(e)]
-        return [python(), "-m", "pip", "install", *words, "pytest", "pytest-cov"]
-    return [python(), "-m", "pip", "install", *shlex.split(cfg.get("ci.install"))]
+        return [python(), "-m", "pip", "install", *words, "pytest", "pytest-cov", *_xdist_pkg(cfg)]
+    return [python(), "-m", "pip", "install", *shlex.split(cfg.get("ci.install")), *_xdist_pkg(cfg)]
+
+
+def _xdist_pkg(cfg: Config) -> list[str]:
+    """``["pytest-xdist"]`` when ``ci.workers`` is set, else nothing."""
+    return ["pytest-xdist"] if cfg.get("ci.workers") else []
+
+
+def _xdist_args(cfg: Config) -> list[str]:
+    """The pytest-xdist flags for ``ci.workers`` and ``ci.dist``; empty when workers is unset."""
+    workers = cfg.get("ci.workers")
+    if not workers:
+        return []
+    dist = cfg.get("ci.dist")
+    return ["-n", workers, *(["--dist", dist] if dist else [])]
 
 
 def _marker_expr(deselect: Sequence[str], existing: str | None = None) -> str:
@@ -103,7 +118,8 @@ def test_command(cfg: Config, subproject: str | None = None, deselect: Sequence[
     `deselect` lists pytest markers to leave out (see :func:`ghtools.selection.deselected`). They
     become one final ``-m 'not a and not b'`` word appended to ``ci.test`` as written, and-joined
     with the effective ``-m`` already in it (the last one, as pytest reads it). Empty `deselect`
-    gives the command unchanged. A root ``ci.test`` that is not pytest is returned as is.
+    gives the command unchanged. With ``ci.workers`` set, ``-n <workers>`` (and ``--dist <dist>``)
+    come last. A root ``ci.test`` that is not pytest is returned as is.
 
     A subproject with ``test-command`` set gets that command verbatim, even when `deselect` is
     non-empty: it may not be pytest, so markers do not apply and more tests run, never fewer.
@@ -119,6 +135,7 @@ def test_command(cfg: Config, subproject: str | None = None, deselect: Sequence[
         parts += ["--junitxml=junit.xml", "-o", "junit_family=legacy"]
         if deselect:
             parts += ["-m", _marker_expr(deselect)]
+        parts += _xdist_args(cfg)
         return " ".join(shlex.quote(p) for p in parts)
     base = cfg.get("ci.test")
     words = shlex.split(base)
@@ -133,6 +150,7 @@ def test_command(cfg: Config, subproject: str | None = None, deselect: Sequence[
     extra += ["--junitxml=junit.xml", "-o", "junit_family=legacy"]
     if package and cfg.get("ci.coverage.floor"):
         extra.append(f"--cov-fail-under={cfg.get('ci.coverage.floor')}")
+    extra += _xdist_args(cfg)
     return f"{base} {' '.join(shlex.quote(e) for e in extra)}"
 
 
