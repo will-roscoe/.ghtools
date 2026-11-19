@@ -44,6 +44,20 @@ jobs:
           path: dist
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 [% endif %]
+[% if ghcr %]
+  # Publishes the released version's container image to ghcr.io (release.publish includes "ghcr").
+  publish-ghcr:
+    needs: pipeline
+    if: needs.pipeline.outputs.released == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: will-roscoe/.ghtools/.github/workflows/ghcr.yml@[[ ref ]]
+    with:
+      tag: ${{ needs.pipeline.outputs.tag }}
+      version: ${{ needs.pipeline.outputs.version }}
+      platforms: [[ platforms ]]
+[% endif %]
 [% if dispatch %]
   # Starts the workflows named by commit directives ([directives].dispatch in ghtools.toml).
   dispatch:

@@ -334,6 +334,44 @@ def test_stub_dispatch_job_only_when_configured():
     assert "actions" not in stub["permissions"]  # granted to that one job only
 
 
+def test_stub_without_ghcr_is_unchanged():
+    plain = scaffold.render_stub("main", pypi=False)
+    assert plain == scaffold.render_stub("main", pypi=False, ghcr=False)
+    assert "publish-ghcr" not in plain and "packages: write" not in plain
+
+
+def test_stub_with_ghcr_publishes_after_release():
+    stub = yaml.safe_load(
+        scaffold.render_stub(
+            "main", pypi=False, ghcr=True, platforms="linux/amd64,linux/arm64", ref="v1"
+        )
+    )
+    job = stub["jobs"]["publish-ghcr"]
+    assert job["needs"] == "pipeline"
+    assert job["if"] == "needs.pipeline.outputs.released == 'true'"
+    assert job["permissions"] == {"contents": "read", "packages": "write"}
+    assert job["uses"].endswith("/.github/workflows/ghcr.yml@v1")
+    assert job["with"] == {
+        "tag": "${{ needs.pipeline.outputs.tag }}",
+        "version": "${{ needs.pipeline.outputs.version }}",
+        "platforms": "linux/amd64,linux/arm64",
+    }
+    assert "packages" not in stub["permissions"]  # granted to that one job only
+
+
+def test_current_stub_renders_ghcr_from_settings(git_repo):
+    git_repo.commit(
+        "ci: ghtools",
+        {
+            ".github/ghtools.toml": '[release]\npublish = ["github", "ghcr"]\n'
+            'platforms = ["linux/amd64", "linux/arm64"]\n',
+            "Dockerfile": "FROM scratch\n",
+        },
+    )
+    job = yaml.safe_load(scaffold.current_stub(git_repo.path))["jobs"]["publish-ghcr"]
+    assert job["with"]["platforms"] == "linux/amd64,linux/arm64"
+
+
 def test_current_stub_keeps_the_pin_and_follows_settings(git_repo):
     from ghtools.cli import main
 
