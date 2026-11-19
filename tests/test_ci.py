@@ -283,3 +283,63 @@ def test_docs_changed_scoped_to_component(git_repo):
     base = git_repo.run("rev-parse", "HEAD").strip()
     git_repo.commit("fix: b", {"src/base/b.py": "1"})
     assert ci.docs_changed(cfg, git_repo.path, base) is True  # a needed subproject
+
+
+# ---- ci.workers / ci.dist: pytest-xdist (#26) ----
+
+JUNIT = "--junitxml=junit.xml -o junit_family=legacy"
+
+
+def test_workers_off_leaves_commands_unchanged():
+    cfg = config.from_dict({})
+    assert ci.test_command(cfg) == f"pytest -q {JUNIT}"
+    assert "pytest-xdist" not in ci.install_command(cfg)
+    assert "pytest-xdist" not in ci.install_command(SUB, "scrapetool")
+
+
+def test_workers_auto_adds_xdist_and_n_auto():
+    cfg = config.from_dict({"ci": {"workers": "auto"}})
+    assert ci.test_command(cfg) == f"pytest -q {JUNIT} -n auto"
+    assert ci.install_command(cfg)[-1] == "pytest-xdist"
+
+
+def test_workers_number_and_dist():
+    cfg = config.from_dict({"ci": {"workers": "4", "dist": "loadfile"}})
+    assert ci.test_command(cfg) == f"pytest -q {JUNIT} -n 4 --dist loadfile"
+
+
+def test_workers_with_coverage_keeps_every_flag():
+    cfg = config.from_dict({"ci": {"workers": "auto", "coverage": {"package": "src/x"}}})
+    cmd = ci.test_command(cfg)
+    assert "--cov=src/x" in cmd and cmd.endswith("-n auto")
+
+
+def test_workers_on_subproject_legs():
+    raw = {
+        "ci": {"workers": "2"},
+        "subprojects": [
+            {"name": "bare", "path": "bare", "package": "bare"},
+            {"name": "own", "path": "own", "test-command": "make check", "install": ["-e ./own"]},
+        ],
+    }
+    cfg = config.from_dict(raw)
+    assert ci.test_command(cfg, "bare").endswith(" -n 2")
+    assert ci.install_command(cfg, "bare")[-3:] == ["pytest", "pytest-cov", "pytest-xdist"]
+    assert ci.test_command(cfg, "own") == "make check"  # its own command, left alone
+
+
+@pytest.mark.parametrize(
+    ("ci_raw", "message"),
+    [
+        ({"workers": "auto", "test": "make test"}, "ci.workers needs ci.test to run pytest"),
+        ({"workers": "0"}, "ci.workers: expected 'auto' or a positive number"),
+        ({"workers": "lots"}, "ci.workers: expected 'auto' or a positive number"),
+        ({"dist": "loadfile"}, "ci.dist needs ci.workers"),
+        ({"workers": "2", "dist": "random"}, "ci.dist: 'random' is not one of"),
+    ],
+)
+def test_workers_and_dist_are_validated(ci_raw, message):
+    from ghtools.errors import ConfigError
+
+    with pytest.raises(ConfigError, match=message):
+        config.from_dict({"ci": ci_raw})
