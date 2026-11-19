@@ -45,6 +45,7 @@ Unset keys take the default. Unknown keys are an error that lists the allowed on
 | `release.root` | `true` | `false` stops the repo releasing as `v{x}`; only released components release |
 | `ci.python`, `ci.runners` | `["3.12"]`, `["ubuntu-latest"]` | test matrix; a leg with no python build for its runner moves to an OS version that has one or is dropped with a warning |
 | `ci.install`, `ci.test` | `"-e .[dev]"`, `"pytest -q"` | install and test commands |
+| `ci.workers`, `ci.dist` | `""`, `""` | run pytest in parallel with pytest-xdist: `"auto"` or a number of workers, and optionally `load`, `loadfile`, `loadscope` or `worksteal`; needs a pytest `ci.test`, and tests that are parallel-safe |
 | `ci.paths` | `["**.py", "pyproject.toml"]` | a push touching none of these skips CI |
 | `ci.skip-pr-heads` | `[]` | head branches whose PRs skip CI (see release flow) |
 | `ci.reuse-pr-results` | `false` | skip CI on the push that merges a PR whose tree already passed |
