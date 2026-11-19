@@ -6,6 +6,29 @@ Conventional Commits by ghtools itself.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-11-19
+
+### Features
+
+- **release**: publish the release's container image to GHCR
+- **ci**: run pytest in parallel with ci.workers (pytest-xdist)
+
+### Bug fixes
+
+- **release**: say why a run did or did not release with --github-output
+
+### Documentation
+
+- release.publish "ghcr" and release.platforms
+- ci.workers and ci.dist
+
+### Build
+
+- **deps**: bump actions/setup-python in /.github/actions/setup-ghtools (#33)
+- **deps**: bump home-assistant/actions/hassfest (#29)
+- **deps**: bump actions/upload-artifact from 7.0.1 to 7.0.2 (#25)
+- **deps**: bump actions/download-artifact from 8.0.1 to 8.0.2 (#24)
+
 ## [1.11.0] - 2026-11-02
 
 ### Features
