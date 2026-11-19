@@ -47,7 +47,9 @@ SCHEMA: dict[str, dict[str, Field]] = {
     },
     "release": {
         "enabled": Field(bool, True),
-        "publish": Field(list, ["github"], _c("github", "github-zip", "pypi")),
+        "publish": Field(list, ["github"], _c("github", "github-zip", "pypi", "ghcr")),
+        # buildx platforms the "ghcr" image is built for
+        "platforms": Field(list, ["linux/amd64"], _c("linux/amd64", "linux/arm64", "linux/arm/v7")),
         "zip": Field(str, ""),
         "commit": Field(bool, True),
         "changelog": Field(str, "CHANGELOG.md"),
@@ -495,6 +497,8 @@ def check_paths(cfg: Config, root: Path) -> None:
     zip_dir = cfg.get("release.zip")
     if "github-zip" in cfg.get("release.publish") and not (root / zip_dir).is_dir():
         raise ConfigError(f"release.zip: {zip_dir} is not a directory")
+    if "ghcr" in cfg.get("release.publish") and not (root / "Dockerfile").is_file():
+        raise ConfigError("release.publish: 'ghcr' needs a Dockerfile at the repository root")
     if cfg.get("docs.enabled") and not (root / cfg.get("docs.dir") / "conf.py").is_file():
         raise ConfigError(f"docs.dir: {cfg.get('docs.dir')}/conf.py does not exist")
     logo = cfg.get("status.logo")
