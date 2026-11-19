@@ -167,6 +167,13 @@ def test_config_job_can_see_a_pending_resume():
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
 
 
+def test_release_job_decides_once():
+    # The Decide step writes the step summary itself (#27), so no second decide may repeat it.
+    doc = yaml.safe_load(PIPELINE.read_text())
+    runs = [s.get("run", "") for s in doc["jobs"]["release"]["steps"]]
+    assert sum("release decide" in r for r in runs) == 1
+
+
 def test_hacs_jobs_use_the_configured_python():
     # Review I7: ios2ha-camera-hass needs 3.14; a hardcoded 3.13 breaks its install.
     for job in ("hacs-test",):

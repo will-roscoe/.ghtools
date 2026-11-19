@@ -143,6 +143,32 @@ def test_cli_release_decide_github_output(git_repo, tmp_path, monkeypatch):
     assert "released=true\nversion=0.1.0\ntag=v0.1.0\n" in out.read_text()
 
 
+def test_cli_release_decide_github_output_says_why(git_repo, tmp_path, monkeypatch, capsys):
+    # #27: with --github-output the run must still say why it did or did not release.
+    git_repo.commit("feat: a")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "gh_out"))
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    assert main(["-C", str(git_repo.path), "release", "decide", "--github-output"]) == 0
+    decision = release.decide(config.load_or_defaults(git_repo.path), git_repo.path)
+    assert decision.reason in capsys.readouterr().out
+    assert decision.summary() in summary.read_text()
+
+
+def test_cli_release_decide_github_output_without_step_summary(
+    git_repo, tmp_path, monkeypatch, capsys
+):
+    git_repo.commit("feat: a")
+    git_repo.tag("v0.1.0")
+    git_repo.commit("docs: b")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "gh_out"))
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    assert main(["-C", str(git_repo.path), "release", "decide", "--github-output"]) == 0
+    decision = release.decide(config.load_or_defaults(git_repo.path), git_repo.path)
+    assert not decision.release
+    assert decision.reason in capsys.readouterr().out
+
+
 def test_cli_release_prepare_prints_changed_paths(git_repo, capsys):
     git_repo.commit("feat: a", {"CHANGELOG.md": CHANGELOG})
     git_repo.tag("v0.1.0")
